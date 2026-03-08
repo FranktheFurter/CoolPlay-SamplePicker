@@ -40,6 +40,7 @@ export interface AppState {
   samples: SampleRecord[];
   filteredSamples: SampleRecord[];
   selectedSampleId: string | null;
+  slotCounter: number;
   loopEnabled: boolean;
   query: string;
   showAssignedOnly: boolean;

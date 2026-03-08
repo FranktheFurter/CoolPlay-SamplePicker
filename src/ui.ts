@@ -3,21 +3,51 @@ import type { AppState, SampleRecord, WaveformPreview } from "./types";
 interface UIHandlers {
   onPickDirectory: () => void | Promise<void>;
   onRefreshScan: () => void | Promise<void>;
+  onResetAssignments: () => void | Promise<void>;
   onSearchChange: (query: string) => void;
   onAssignedOnlyChange: (showAssignedOnly: boolean) => void;
+  onSlotCounterChange: (slotNumber: number) => void;
+  onSlotCounterAdjust: (delta: number) => void;
+  onSlotCategoryActivate: (rangeStart: number, rangeEnd: number) => void;
   onLoopEnabledChange: (loopEnabled: boolean) => void;
   getPlaybackProgress: (
     sampleId: string,
     fallbackDurationSeconds: number,
   ) => number | null;
   onSelectSample: (sampleId: string) => void;
-  onAssignSlot: (sampleId: string, slotValue: string) => void | Promise<void>;
+  onWriteSample: (sampleId: string) => void | Promise<void>;
   onTogglePlay: (sampleId: string) => void | Promise<void>;
 }
 
 interface UIController {
   render: (state: AppState) => void;
 }
+
+interface SlotCategoryDefinition {
+  key: string;
+  label: string;
+  start: number;
+  end: number;
+}
+
+interface SlotCategoryElements {
+  definition: SlotCategoryDefinition;
+  input: HTMLInputElement;
+  cells: HTMLDivElement[];
+}
+
+const SLOT_CATEGORY_DEFINITIONS: SlotCategoryDefinition[] = [
+  { key: "kicks", label: "Kicks", start: 1, end: 99 },
+  { key: "snares", label: "Snares", start: 100, end: 199 },
+  { key: "cymbals", label: "Cymbals", start: 200, end: 299 },
+  { key: "perc", label: "Perc", start: 300, end: 399 },
+  { key: "bass", label: "Bass", start: 400, end: 499 },
+  { key: "leads", label: "Leads", start: 500, end: 599 },
+  { key: "skanks", label: "Skanks", start: 600, end: 699 },
+  { key: "voxfx", label: "Vox & Fx", start: 700, end: 799 },
+  { key: "loops", label: "Loops", start: 800, end: 899 },
+  { key: "user", label: "User", start: 900, end: 999 },
+];
 
 function formatCount(count: number): string {
   return `${count} Sample${count === 1 ? "" : "s"}`;
@@ -180,27 +210,19 @@ function createRow(
   playButton.dataset.id = sample.id;
   playButton.textContent = sample.id === currentAudioId ? "Stop" : "Play";
 
-  const slotInput = document.createElement("input");
-  slotInput.className = "slot-input";
-  slotInput.type = "number";
-  slotInput.name = "slot-number";
-  slotInput.min = "1";
-  slotInput.max = "999";
-  slotInput.step = "1";
-  slotInput.placeholder = "Nr.";
-  slotInput.dataset.action = "slot-input";
-  slotInput.dataset.id = sample.id;
-  slotInput.value = sample.slotNumber === null ? "" : String(sample.slotNumber);
+  const slotIndicator = document.createElement("span");
+  slotIndicator.className = "slot-indicator";
+  slotIndicator.textContent =
+    sample.slotNumber === null ? "Nr. -" : `Nr. ${sample.slotNumber}`;
 
-  const assignButton = document.createElement("button");
-  assignButton.className =
-    sample.slotNumber === null ? "row-button" : "row-button active";
-  assignButton.type = "button";
-  assignButton.dataset.action = "assign";
-  assignButton.dataset.id = sample.id;
-  assignButton.textContent = "Setzen";
+  const writeButton = document.createElement("button");
+  writeButton.className = "row-button write-button";
+  writeButton.type = "button";
+  writeButton.dataset.action = "write";
+  writeButton.dataset.id = sample.id;
+  writeButton.textContent = "Write";
 
-  actions.append(playButton, slotInput, assignButton);
+  actions.append(playButton, slotIndicator, writeButton);
   row.append(name, path, category, actions);
 
   return row;
@@ -273,6 +295,15 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
         </section>
 
         <section class="results">
+          <div class="results-toolbar">
+            <button
+              type="button"
+              class="danger-button"
+              data-role="reset-assignments"
+            >
+              Alle Zuweisungen zuruecksetzen
+            </button>
+          </div>
           <div class="results-header">
             <div>Name</div>
             <div>Pfad</div>
@@ -284,11 +315,19 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       </section>
 
       <aside class="slot-panel">
-        <div class="slot-panel-header">
-          <strong>Nummern-Matrix</strong>
-          <span data-role="slot-summary">0 / 999 belegt</span>
+        <div class="slot-panel-head">
+          <span class="slot-counter-label">Writehead</span>
+          <input
+            type="number"
+            min="1"
+            max="999"
+            step="1"
+            class="slot-counter-input"
+            data-role="slot-counter"
+            aria-label="Writehead Counter"
+          />
         </div>
-        <div class="slot-grid" data-role="slot-grid"></div>
+        <div class="slot-categories" data-role="slot-categories"></div>
       </aside>
     </main>
   `;
@@ -298,6 +337,9 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   );
   const refreshScanButton = root.querySelector<HTMLButtonElement>(
     '[data-role="refresh-scan"]',
+  );
+  const resetAssignmentsButton = root.querySelector<HTMLButtonElement>(
+    '[data-role="reset-assignments"]',
   );
   const searchInput = root.querySelector<HTMLInputElement>('[data-role="search"]');
   const assignedOnlyInput = root.querySelector<HTMLInputElement>(
@@ -327,12 +369,17 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   const resultsBody = root.querySelector<HTMLDivElement>(
     '[data-role="results-body"]',
   );
-  const slotSummary = root.querySelector<HTMLElement>('[data-role="slot-summary"]');
-  const slotGrid = root.querySelector<HTMLDivElement>('[data-role="slot-grid"]');
+  const slotCounterInput = root.querySelector<HTMLInputElement>(
+    '[data-role="slot-counter"]',
+  );
+  const slotCategories = root.querySelector<HTMLDivElement>(
+    '[data-role="slot-categories"]',
+  );
 
   if (
     !pickDirectoryButton ||
     !refreshScanButton ||
+    !resetAssignmentsButton ||
     !searchInput ||
     !assignedOnlyInput ||
     !statusElement ||
@@ -345,16 +392,18 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     !waveformBaseCanvas ||
     !waveformPlayheadCanvas ||
     !resultsBody ||
-    !slotSummary ||
-    !slotGrid
+    !slotCounterInput ||
+    !slotCategories
   ) {
     throw new Error("UI konnte nicht initialisiert werden.");
   }
 
   const waveformBaseCanvasElement = waveformBaseCanvas;
   const waveformPlayheadCanvasElement = waveformPlayheadCanvas;
-  const slotSummaryElement = slotSummary;
-  const slotGridElement = slotGrid;
+  const slotCategoriesElement = slotCategories;
+  const slotCounterInputElement = slotCounterInput;
+  const searchInputElement = searchInput;
+  const slotCategoryElements: SlotCategoryElements[] = [];
   let latestWaveform: WaveformPreview | null = null;
   let latestSelectedSampleId: string | null = null;
   let latestCurrentAudioId: string | null = null;
@@ -412,6 +461,77 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     }
   }
 
+  function createSlotCategoryElements(): void {
+    slotCategoriesElement.replaceChildren();
+    slotCategoryElements.length = 0;
+
+    const fragment = document.createDocumentFragment();
+
+    const triggerSearch = (query: string): void => {
+      searchInputElement.value = query;
+      searchInputElement.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+
+    for (const definition of SLOT_CATEGORY_DEFINITIONS) {
+      const categoryElement = document.createElement("section");
+      categoryElement.className = "slot-category";
+
+      const metaElement = document.createElement("div");
+      metaElement.className = "slot-category-meta";
+      const rangeElement = document.createElement("span");
+      rangeElement.className = "slot-category-range";
+      rangeElement.textContent = `${definition.start} - ${definition.end}`;
+
+      const inputElement = document.createElement("input");
+      inputElement.className = "slot-category-input";
+      inputElement.type = "text";
+      inputElement.name = `slot-category-${definition.key}`;
+      inputElement.value = definition.label;
+
+      const pixelsElement = document.createElement("div");
+      pixelsElement.className = "slot-category-pixels";
+
+      const cells: HTMLDivElement[] = [];
+
+      for (let index = 0; index < 100; index += 1) {
+        const pixelElement = document.createElement("div");
+        pixelElement.className = "slot-pixel";
+
+        const slotNumber = definition.start + index;
+
+        if (slotNumber <= definition.end) {
+          pixelElement.dataset.slotNumber = String(slotNumber);
+        } else {
+          pixelElement.classList.add("is-empty");
+        }
+
+        cells.push(pixelElement);
+        pixelsElement.append(pixelElement);
+      }
+
+      metaElement.append(inputElement, rangeElement);
+      categoryElement.append(metaElement, pixelsElement);
+      categoryElement.addEventListener("click", (event) => {
+        const target = event.target as HTMLElement;
+
+        if (target.closest(".slot-category-input")) {
+          return;
+        }
+
+        triggerSearch(inputElement.value);
+        handlers.onSlotCategoryActivate(definition.start, definition.end);
+      });
+      fragment.append(categoryElement);
+      slotCategoryElements.push({
+        definition,
+        input: inputElement,
+        cells,
+      });
+    }
+
+    slotCategoriesElement.append(fragment);
+  }
+
   function renderSlotMatrix(state: AppState): void {
     const assignedSlots = new Set<number>();
 
@@ -425,29 +545,23 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       state.samples.find((sample) => sample.id === state.selectedSampleId)
         ?.slotNumber ?? null;
 
-    slotSummaryElement.textContent = `${assignedSlots.size} / 999 belegt`;
-    slotGridElement.replaceChildren();
+    for (const category of slotCategoryElements) {
+      for (const cell of category.cells) {
+        const slotNumber = Number.parseInt(cell.dataset.slotNumber ?? "", 10);
 
-    const fragment = document.createDocumentFragment();
+        if (!Number.isInteger(slotNumber)) {
+          cell.classList.remove("is-assigned", "is-selected", "is-counter");
+          continue;
+        }
 
-    for (let slot = 1; slot <= 999; slot += 1) {
-      const cell = document.createElement("div");
-      cell.className = "slot-cell";
-      cell.textContent = String(slot);
-
-      if (assignedSlots.has(slot)) {
-        cell.classList.add("is-assigned");
+        cell.classList.toggle("is-assigned", assignedSlots.has(slotNumber));
+        cell.classList.toggle("is-selected", selectedSlotNumber === slotNumber);
+        cell.classList.toggle("is-counter", state.slotCounter === slotNumber);
       }
-
-      if (selectedSlotNumber === slot) {
-        cell.classList.add("is-selected");
-      }
-
-      fragment.append(cell);
     }
-
-    slotGridElement.append(fragment);
   }
+
+  createSlotCategoryElements();
 
   pickDirectoryButton.addEventListener("click", () => {
     void handlers.onPickDirectory();
@@ -455,6 +569,18 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
 
   refreshScanButton.addEventListener("click", () => {
     void handlers.onRefreshScan();
+  });
+
+  resetAssignmentsButton.addEventListener("click", () => {
+    const shouldReset = window.confirm(
+      "Alle Zuweisungen wirklich zuruecksetzen? Dieser Schritt kann nicht rueckgaengig gemacht werden.",
+    );
+
+    if (!shouldReset) {
+      return;
+    }
+
+    void handlers.onResetAssignments();
   });
 
   searchInput.addEventListener("input", (event) => {
@@ -465,6 +591,31 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   assignedOnlyInput.addEventListener("change", (event) => {
     const target = event.currentTarget as HTMLInputElement;
     handlers.onAssignedOnlyChange(target.checked);
+  });
+
+  slotCounterInputElement.addEventListener(
+    "wheel",
+    (event) => {
+      event.preventDefault();
+
+      if (event.deltaY === 0) {
+        return;
+      }
+
+      handlers.onSlotCounterAdjust(event.deltaY > 0 ? 1 : -1);
+    },
+    { passive: false },
+  );
+
+  slotCounterInputElement.addEventListener("input", (event) => {
+    const target = event.currentTarget as HTMLInputElement;
+    const parsed = Number.parseInt(target.value, 10);
+
+    if (!Number.isInteger(parsed)) {
+      return;
+    }
+
+    handlers.onSlotCounterChange(parsed);
   });
 
   loopToggleInput.addEventListener("change", (event) => {
@@ -490,18 +641,10 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
         return;
       }
 
-      if (action === "assign") {
-        const row = button.closest<HTMLDivElement>(".sample-row");
-        const slotInput = row?.querySelector<HTMLInputElement>(
-          'input[data-action="slot-input"]',
-        );
-        void handlers.onAssignSlot(sampleId, slotInput?.value ?? "");
+      if (action === "write") {
+        void handlers.onWriteSample(sampleId);
       }
 
-      return;
-    }
-
-    if (target.closest('input[data-action="slot-input"]')) {
       return;
     }
 
@@ -514,34 +657,18 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     handlers.onSelectSample(row.dataset.id);
   });
 
-  resultsBody.addEventListener("keydown", (event) => {
-    const target = event.target as HTMLElement;
-
-    if (!(target instanceof HTMLInputElement)) {
-      return;
-    }
-
-    if (target.dataset.action !== "slot-input" || event.key !== "Enter") {
-      return;
-    }
-
-    const sampleId = target.dataset.id;
-
-    if (!sampleId) {
-      return;
-    }
-
-    event.preventDefault();
-    void handlers.onAssignSlot(sampleId, target.value);
-  });
-
   return {
     render(state) {
       pickDirectoryButton.disabled = state.isScanning;
       refreshScanButton.disabled =
         state.isScanning || state.currentDirectoryId === null;
+      resetAssignmentsButton.disabled =
+        state.isScanning ||
+        state.currentDirectoryId === null ||
+        !state.samples.some((sample) => sample.slotNumber !== null);
       searchInput.value = state.query;
       assignedOnlyInput.checked = state.showAssignedOnly;
+      slotCounterInputElement.value = String(state.slotCounter);
       loopToggleInput.checked = state.loopEnabled;
 
       statusElement.textContent = formatStatus(state);

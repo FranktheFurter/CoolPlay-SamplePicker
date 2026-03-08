@@ -27,6 +27,54 @@ const audioPreview = new AudioPreviewController((sampleId) => {
 let activeDirectory: PersistedDirectory | null = null;
 let waveformRequestToken = 0;
 let lastSelectedSampleId: string | null = null;
+const MIN_SLOT_NUMBER = 1;
+const MAX_SLOT_NUMBER = 999;
+
+function clampSlotCounter(slotNumber: number): number {
+  if (!Number.isFinite(slotNumber)) {
+    return MIN_SLOT_NUMBER;
+  }
+
+  return Math.min(MAX_SLOT_NUMBER, Math.max(MIN_SLOT_NUMBER, Math.round(slotNumber)));
+}
+
+function getNextSlotInRange(
+  samples: SampleRecord[],
+  rangeStart: number,
+  rangeEnd: number,
+): number {
+  const start = clampSlotCounter(Math.min(rangeStart, rangeEnd));
+  const end = clampSlotCounter(Math.max(rangeStart, rangeEnd));
+  const assignedInRange = new Set<number>();
+  let highestAssigned = start - 1;
+
+  for (const sample of samples) {
+    if (sample.slotNumber === null) {
+      continue;
+    }
+
+    if (sample.slotNumber < start || sample.slotNumber > end) {
+      continue;
+    }
+
+    assignedInRange.add(sample.slotNumber);
+    highestAssigned = Math.max(highestAssigned, sample.slotNumber);
+  }
+
+  const nextAfterHighest = highestAssigned + 1;
+
+  if (nextAfterHighest <= end && !assignedInRange.has(nextAfterHighest)) {
+    return nextAfterHighest;
+  }
+
+  for (let slotNumber = start; slotNumber <= end; slotNumber += 1) {
+    if (!assignedInRange.has(slotNumber)) {
+      return slotNumber;
+    }
+  }
+
+  return end;
+}
 
 function deriveState(nextState: AppState): AppState {
   const filteredSamples = filterSamples(
@@ -253,12 +301,70 @@ async function handleRefreshScan(): Promise<void> {
   await runScan(activeDirectory);
 }
 
+async function handleResetAssignments(): Promise<void> {
+  const previousState = store.getState();
+
+  if (!previousState.currentDirectoryId) {
+    return;
+  }
+
+  if (!previousState.samples.some((sample) => sample.slotNumber !== null)) {
+    return;
+  }
+
+  const nextSamples = previousState.samples.map((sample) =>
+    sample.slotNumber === null ? sample : { ...sample, slotNumber: null },
+  );
+
+  commitState({
+    samples: nextSamples,
+    slotCounter: MIN_SLOT_NUMBER,
+    error: null,
+  });
+
+  try {
+    await replaceSamplesForDirectory(previousState.currentDirectoryId, nextSamples);
+  } catch (error) {
+    commitState({
+      samples: previousState.samples,
+      slotCounter: previousState.slotCounter,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Konnte Zuweisungen nicht zuruecksetzen.",
+    });
+  }
+}
+
 function handleSearchChange(query: string): void {
   commitState({ query });
 }
 
 function handleAssignedOnlyChange(showAssignedOnly: boolean): void {
   commitState({ showAssignedOnly });
+}
+
+function handleSlotCounterChange(slotNumber: number): void {
+  commitState({ slotCounter: clampSlotCounter(slotNumber) });
+}
+
+function handleSlotCounterAdjust(delta: number): void {
+  if (!Number.isFinite(delta) || delta === 0) {
+    return;
+  }
+
+  const step = delta > 0 ? 1 : -1;
+  const currentCounter = store.getState().slotCounter;
+  handleSlotCounterChange(currentCounter + step);
+}
+
+function handleSlotCategoryActivate(rangeStart: number, rangeEnd: number): void {
+  const slotCounter = getNextSlotInRange(
+    store.getState().samples,
+    rangeStart,
+    rangeEnd,
+  );
+  commitState({ slotCounter });
 }
 
 function handleLoopEnabledChange(loopEnabled: boolean): void {
@@ -287,38 +393,20 @@ function handlePlaybackProgress(
   return audioPreview.getPlayheadProgress(sampleId, fallbackDurationSeconds);
 }
 
-async function handleAssignSlot(
-  sampleId: string,
-  rawSlotValue: string,
-): Promise<void> {
-  const previousSamples = store.getState().samples;
+async function handleWriteSample(sampleId: string): Promise<void> {
+  const previousState = store.getState();
+  const previousSamples = previousState.samples;
+  const nextSlotNumber = previousState.slotCounter;
   const sample = previousSamples.find((entry) => entry.id === sampleId);
 
   if (!sample) {
     return;
   }
 
-  const trimmedValue = rawSlotValue.trim();
-  const nextSlotNumber =
-    trimmedValue.length === 0 ? null : Number.parseInt(trimmedValue, 10);
-
-  if (
-    nextSlotNumber !== null &&
-    (!Number.isInteger(nextSlotNumber) || nextSlotNumber < 1 || nextSlotNumber > 999)
-  ) {
-    commitState({
-      error: "Bitte eine ganze Zahl von 1 bis 999 eingeben.",
-    });
-    return;
-  }
-
   const conflictingSampleId =
-    nextSlotNumber === null
-      ? null
-      : previousSamples.find(
-          (entry) =>
-            entry.id !== sampleId && entry.slotNumber === nextSlotNumber,
-        )?.id ?? null;
+    previousSamples.find(
+      (entry) => entry.id !== sampleId && entry.slotNumber === nextSlotNumber,
+    )?.id ?? null;
 
   const nextSamples = previousSamples.map((entry) =>
     entry.id === sampleId
@@ -328,7 +416,11 @@ async function handleAssignSlot(
         : entry,
   );
 
-  commitState({ samples: nextSamples, error: null });
+  commitState({
+    samples: nextSamples,
+    slotCounter: clampSlotCounter(nextSlotNumber + 1),
+    error: null,
+  });
 
   try {
     await updateSampleSlotNumber(sampleId, nextSlotNumber);
@@ -339,6 +431,7 @@ async function handleAssignSlot(
   } catch (error) {
     commitState({
       samples: previousSamples,
+      slotCounter: previousState.slotCounter,
       error:
         error instanceof Error
           ? error.message
@@ -394,12 +487,16 @@ if (!appRoot) {
 const ui = createUI(appRoot, {
   onPickDirectory: handlePickDirectory,
   onRefreshScan: handleRefreshScan,
+  onResetAssignments: handleResetAssignments,
   onSearchChange: handleSearchChange,
   onAssignedOnlyChange: handleAssignedOnlyChange,
+  onSlotCounterChange: handleSlotCounterChange,
+  onSlotCounterAdjust: handleSlotCounterAdjust,
+  onSlotCategoryActivate: handleSlotCategoryActivate,
   onLoopEnabledChange: handleLoopEnabledChange,
   getPlaybackProgress: handlePlaybackProgress,
   onSelectSample: handleSelectSample,
-  onAssignSlot: handleAssignSlot,
+  onWriteSample: handleWriteSample,
   onTogglePlay: handleTogglePlay,
 });
 

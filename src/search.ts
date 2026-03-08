@@ -9,13 +9,23 @@ export function filterSamples(
   query: string,
   showAssignedOnly: boolean,
 ): SampleRecord[] {
+  if (showAssignedOnly) {
+    return samples
+      .filter((sample) => sample.slotNumber !== null)
+      .sort((left, right) => {
+        const slotOrder = (left.slotNumber ?? 0) - (right.slotNumber ?? 0);
+
+        if (slotOrder !== 0) {
+          return slotOrder;
+        }
+
+        return left.normalizedName.localeCompare(right.normalizedName);
+      });
+  }
+
   const normalizedQuery = normalizeQuery(query);
 
   return samples.filter((sample) => {
-    if (showAssignedOnly && sample.slotNumber === null) {
-      return false;
-    }
-
     if (!normalizedQuery) {
       return true;
     }
