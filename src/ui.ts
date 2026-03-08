@@ -1,4 +1,4 @@
-import type { AppState, SampleRecord } from "./types";
+import type { AppState, SampleRecord, WaveformPreview } from "./types";
 
 interface UIHandlers {
   onPickDirectory: () => void | Promise<void>;
@@ -34,6 +34,69 @@ function formatStatus(state: AppState): string {
     : "Index aus IndexedDB geladen.";
 
   return `Ordner: ${state.currentDirectoryName} · ${lastScan}`;
+}
+
+function formatDuration(durationSeconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(durationSeconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, "0");
+  return `${minutes}:${seconds}`;
+}
+
+function drawWaveform(
+  canvas: HTMLCanvasElement,
+  waveform: WaveformPreview | null,
+): void {
+  const width = Math.max(1, Math.floor(canvas.clientWidth));
+  const height = Math.max(1, Math.floor(canvas.clientHeight));
+  const devicePixelRatio = window.devicePixelRatio || 1;
+  const renderWidth = Math.max(1, Math.floor(width * devicePixelRatio));
+  const renderHeight = Math.max(1, Math.floor(height * devicePixelRatio));
+
+  if (canvas.width !== renderWidth || canvas.height !== renderHeight) {
+    canvas.width = renderWidth;
+    canvas.height = renderHeight;
+  }
+
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return;
+  }
+
+  context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  context.clearRect(0, 0, width, height);
+
+  const centerY = height / 2;
+  context.strokeStyle = "rgba(101, 93, 82, 0.32)";
+  context.lineWidth = 1;
+  context.beginPath();
+  context.moveTo(0, centerY);
+  context.lineTo(width, centerY);
+  context.stroke();
+
+  if (!waveform || waveform.peaks.length === 0) {
+    context.fillStyle = "rgba(101, 93, 82, 0.45)";
+    context.fillRect(Math.max(0, width / 2 - 2), centerY - 18, 4, 36);
+    return;
+  }
+
+  const usableHeight = Math.max(8, height - 8);
+  const barWidth = 2;
+  const gap = 1;
+  const step = barWidth + gap;
+  const barCount = Math.max(1, Math.floor(width / step));
+
+  context.fillStyle = "rgba(15, 74, 37, 0.88)";
+
+  for (let i = 0; i < barCount; i += 1) {
+    const x = i * step;
+    const peakIndex = Math.floor((i / barCount) * waveform.peaks.length);
+    const amplitude = Math.max(0.03, waveform.peaks[peakIndex] ?? 0);
+    const barHeight = amplitude * usableHeight;
+    const y = centerY - barHeight / 2;
+    context.fillRect(x, y, barWidth, barHeight);
+  }
 }
 
 function createRow(
@@ -126,6 +189,14 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
 
       <div class="error-box" data-role="error" hidden></div>
 
+      <section class="waveform-panel" data-role="waveform-panel">
+        <div class="waveform-meta">
+          <strong data-role="waveform-title">Kein Sample aktiv</strong>
+          <span data-role="waveform-duration">Play klicken, um Waveform zu sehen</span>
+        </div>
+        <canvas class="waveform-canvas" data-role="waveform-canvas"></canvas>
+      </section>
+
       <section class="results">
         <div class="results-header">
           <div>Name</div>
@@ -151,6 +222,18 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   const statusElement = root.querySelector<HTMLDivElement>('[data-role="status"]');
   const countElement = root.querySelector<HTMLDivElement>('[data-role="count"]');
   const errorElement = root.querySelector<HTMLDivElement>('[data-role="error"]');
+  const waveformPanel = root.querySelector<HTMLElement>(
+    '[data-role="waveform-panel"]',
+  );
+  const waveformTitle = root.querySelector<HTMLElement>(
+    '[data-role="waveform-title"]',
+  );
+  const waveformDuration = root.querySelector<HTMLElement>(
+    '[data-role="waveform-duration"]',
+  );
+  const waveformCanvas = root.querySelector<HTMLCanvasElement>(
+    '[data-role="waveform-canvas"]',
+  );
   const resultsBody = root.querySelector<HTMLDivElement>(
     '[data-role="results-body"]',
   );
@@ -163,10 +246,20 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     !statusElement ||
     !countElement ||
     !errorElement ||
+    !waveformPanel ||
+    !waveformTitle ||
+    !waveformDuration ||
+    !waveformCanvas ||
     !resultsBody
   ) {
     throw new Error("UI konnte nicht initialisiert werden.");
   }
+
+  let latestWaveform: WaveformPreview | null = null;
+
+  window.addEventListener("resize", () => {
+    drawWaveform(waveformCanvas, latestWaveform);
+  });
 
   pickDirectoryButton.addEventListener("click", () => {
     void handlers.onPickDirectory();
@@ -230,6 +323,21 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
         errorElement.hidden = true;
         errorElement.textContent = "";
       }
+
+      if (state.currentWaveform) {
+        waveformPanel.classList.add("is-active");
+        waveformTitle.textContent = state.currentWaveform.sampleName;
+        waveformDuration.textContent = formatDuration(
+          state.currentWaveform.durationSeconds,
+        );
+      } else {
+        waveformPanel.classList.remove("is-active");
+        waveformTitle.textContent = "Kein Sample aktiv";
+        waveformDuration.textContent = "Play klicken, um Waveform zu sehen";
+      }
+
+      latestWaveform = state.currentWaveform;
+      drawWaveform(waveformCanvas, latestWaveform);
 
       resultsBody.replaceChildren();
 

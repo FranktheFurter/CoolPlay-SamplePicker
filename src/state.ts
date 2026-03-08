@@ -11,6 +11,7 @@ export const initialAppState: AppState = {
   currentDirectoryName: null,
   isScanning: false,
   currentAudioId: null,
+  currentWaveform: null,
   lastScanAt: null,
   error: null,
 };
@@ -40,4 +41,3 @@ export function createAppStore(initialState: AppState) {
     },
   };
 }
-

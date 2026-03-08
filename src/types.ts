@@ -29,6 +29,13 @@ export interface PersistedDirectory {
   selectedAt: number;
 }
 
+export interface WaveformPreview {
+  sampleId: string;
+  sampleName: string;
+  durationSeconds: number;
+  peaks: number[];
+}
+
 export interface AppState {
   samples: SampleRecord[];
   filteredSamples: SampleRecord[];
@@ -38,7 +45,7 @@ export interface AppState {
   currentDirectoryName: string | null;
   isScanning: boolean;
   currentAudioId: string | null;
+  currentWaveform: WaveformPreview | null;
   lastScanAt: number | null;
   error: string | null;
 }
-

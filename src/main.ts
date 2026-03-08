@@ -19,9 +19,14 @@ import type { AppState, PersistedDirectory, SampleRecord } from "./types";
 import { createUI } from "./ui";
 
 const store = createAppStore(initialAppState);
-const audioPreview = new AudioPreviewController((sampleId) => {
-  commitState({ currentAudioId: sampleId });
-});
+const audioPreview = new AudioPreviewController(
+  (sampleId) => {
+    commitState({ currentAudioId: sampleId });
+  },
+  (waveform) => {
+    commitState({ currentWaveform: waveform });
+  },
+);
 
 let activeDirectory: PersistedDirectory | null = null;
 
@@ -233,12 +238,18 @@ async function handleTogglePlay(sampleId: string): Promise<void> {
       throw new Error("Leseberechtigung fuer Audio-Preview wurde verweigert.");
     }
 
-    await audioPreview.toggle(sample.id, async () =>
-      getFileFromRelativePath(activeDirectory!.handle, sample.relativePath),
+    await audioPreview.toggle(
+      {
+        id: sample.id,
+        name: sample.name,
+      },
+      async () =>
+        getFileFromRelativePath(activeDirectory!.handle, sample.relativePath),
     );
   } catch (error) {
     commitState({
       currentAudioId: null,
+      currentWaveform: null,
       error:
         error instanceof Error
           ? error.message
