@@ -593,6 +593,22 @@ function handleSearchChange(query: string): void {
 
 function handleAssignedOnlyChange(showAssignedOnly: boolean): void {
   commitState({ showAssignedOnly });
+
+  if (!showAssignedOnly) {
+    return;
+  }
+
+  const nextState = store.getState();
+  const selectedSample =
+    nextState.selectedSampleId === null
+      ? null
+      : nextState.samples.find((sample) => sample.id === nextState.selectedSampleId) ??
+        null;
+  const selectedSlotNumber = selectedSample?.slotNumber ?? null;
+
+  if (selectedSlotNumber !== null && nextState.slotCounter !== selectedSlotNumber) {
+    commitState({ slotCounter: selectedSlotNumber });
+  }
 }
 
 function handleSlotCounterChange(slotNumber: number): void {
@@ -629,8 +645,21 @@ function handleAutoplayEnabledChange(autoplayEnabled: boolean): void {
 
 function handleSelectSample(sampleId: string): void {
   const state = store.getState();
+  const targetSample = state.samples.find((entry) => entry.id === sampleId);
+
+  if (!targetSample) {
+    return;
+  }
+
+  const shouldSnapCounterToSelection =
+    state.showAssignedOnly &&
+    targetSample.slotNumber !== null &&
+    state.slotCounter !== targetSample.slotNumber;
 
   if (state.selectedSampleId === sampleId) {
+    if (shouldSnapCounterToSelection && targetSample.slotNumber !== null) {
+      commitState({ slotCounter: targetSample.slotNumber });
+    }
     return;
   }
 
@@ -638,7 +667,15 @@ function handleSelectSample(sampleId: string): void {
     audioPreview.stop();
   }
 
-  commitState({ selectedSampleId: sampleId });
+  const nextPatch: Partial<AppState> = {
+    selectedSampleId: sampleId,
+  };
+
+  if (shouldSnapCounterToSelection && targetSample.slotNumber !== null) {
+    nextPatch.slotCounter = targetSample.slotNumber;
+  }
+
+  commitState(nextPatch);
 }
 
 function handleSelectRandomSample(): string | null {
