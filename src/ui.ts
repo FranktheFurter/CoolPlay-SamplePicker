@@ -108,7 +108,7 @@ function drawWaveform(
   context.clearRect(0, 0, width, height);
 
   const centerY = height / 2;
-  context.strokeStyle = "rgba(101, 93, 82, 0.32)";
+  context.strokeStyle = "rgba(112, 84, 93, 0.34)";
   context.lineWidth = 1;
   context.beginPath();
   context.moveTo(0, centerY);
@@ -116,7 +116,7 @@ function drawWaveform(
   context.stroke();
 
   if (!waveform || waveform.peaks.length === 0) {
-    context.fillStyle = "rgba(101, 93, 82, 0.45)";
+    context.fillStyle = "rgba(112, 84, 93, 0.46)";
     context.fillRect(Math.max(0, width / 2 - 2), centerY - 18, 4, 36);
     return;
   }
@@ -127,7 +127,7 @@ function drawWaveform(
   const step = barWidth + gap;
   const barCount = Math.max(1, Math.floor(width / step));
 
-  context.fillStyle = "rgba(15, 74, 37, 0.88)";
+  context.fillStyle = "rgba(110, 16, 47, 0.88)";
 
   for (let i = 0; i < barCount; i += 1) {
     const x = i * step;
@@ -170,7 +170,7 @@ function drawPlayhead(
 
   const clamped = Math.max(0, Math.min(1, playheadProgress));
   const x = Math.round(clamped * (width - 1)) + 0.5;
-  context.strokeStyle = "rgba(22, 101, 52, 0.95)";
+  context.strokeStyle = "rgba(47, 154, 131, 0.95)";
   context.lineWidth = 2;
   context.beginPath();
   context.moveTo(x, 2);
@@ -266,10 +266,6 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
         <section class="topbar">
           <div class="headline">
             <h1>Sample Picker</h1>
-            <p>
-              Lokaler Desktop-MVP fuer schnelles Browsen, Vorhoeren und Merken von
-              Kicks, Snares, Hats und anderem Sample-Material.
-            </p>
           </div>
           <div class="panel">
             <div class="controls">
