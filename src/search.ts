@@ -1,8 +1,5 @@
 import type { SampleRecord } from "./types";
-
-function normalizeQuery(value: string): string {
-  return value.toLowerCase().trim();
-}
+import { fuzzyMatch, normalizeFuzzyQuery } from "./fuzzy";
 
 export function filterSamples(
   samples: SampleRecord[],
@@ -23,16 +20,48 @@ export function filterSamples(
       });
   }
 
-  const normalizedQuery = normalizeQuery(query);
+  const normalizedQuery = normalizeFuzzyQuery(query);
 
-  return samples.filter((sample) => {
-    if (!normalizedQuery) {
-      return true;
+  if (!normalizedQuery) {
+    return samples;
+  }
+
+  const scoredMatches: {
+    sample: SampleRecord;
+    score: number;
+    nameScore: number;
+  }[] = [];
+
+  for (const sample of samples) {
+    const nameMatch = fuzzyMatch(sample.name, normalizedQuery);
+    const pathMatch = fuzzyMatch(sample.relativePath, normalizedQuery);
+
+    if (!nameMatch && !pathMatch) {
+      continue;
     }
 
-    return (
-      sample.normalizedName.includes(normalizedQuery) ||
-      sample.relativePath.toLowerCase().includes(normalizedQuery)
-    );
+    const nameScore = nameMatch?.score ?? Number.NEGATIVE_INFINITY;
+    const pathScore = pathMatch?.score ?? Number.NEGATIVE_INFINITY;
+    const score = Math.max(pathScore, nameScore + 2);
+
+    scoredMatches.push({
+      sample,
+      score,
+      nameScore,
+    });
+  }
+
+  scoredMatches.sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+
+    if (right.nameScore !== left.nameScore) {
+      return right.nameScore - left.nameScore;
+    }
+
+    return left.sample.normalizedName.localeCompare(right.sample.normalizedName);
   });
+
+  return scoredMatches.map((entry) => entry.sample);
 }

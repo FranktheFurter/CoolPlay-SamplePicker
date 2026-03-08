@@ -48,44 +48,14 @@ export class AudioPreviewController {
     sample: PlaybackSample,
     getFile: () => Promise<File>,
   ): Promise<void> {
-    if (
-      this.currentSampleId === sample.id &&
-      this.audio &&
-      !this.audio.paused
-    ) {
-      this.stop();
-      return;
-    }
+    await this.start(sample, getFile, this.loopEnabled, true);
+  }
 
-    this.stop();
-
-    const file = await getFile();
-    const url = URL.createObjectURL(file);
-    const audio = new Audio(url);
-    audio.loop = this.loopEnabled;
-
-    audio.addEventListener("ended", () => {
-      this.clear();
-    });
-
-    audio.addEventListener("error", () => {
-      this.clear();
-    });
-
-    this.audio = audio;
-    this.objectUrl = url;
-    this.currentSampleId = sample.id;
-    this.onPlaybackChange(sample.id);
-
-    try {
-      await audio.play();
-      if (this.audio === audio && this.currentSampleId === sample.id) {
-        this.onPlaybackChange(sample.id);
-      }
-    } catch (error) {
-      this.clear();
-      throw error;
-    }
+  async playOnce(
+    sample: PlaybackSample,
+    getFile: () => Promise<File>,
+  ): Promise<void> {
+    await this.start(sample, getFile, false, false);
   }
 
   stop(): void {
@@ -111,6 +81,53 @@ export class AudioPreviewController {
     if (this.currentSampleId !== null) {
       this.currentSampleId = null;
       this.onPlaybackChange(null);
+    }
+  }
+
+  private async start(
+    sample: PlaybackSample,
+    getFile: () => Promise<File>,
+    loopEnabled: boolean,
+    allowToggleStop: boolean,
+  ): Promise<void> {
+    if (
+      allowToggleStop &&
+      this.currentSampleId === sample.id &&
+      this.audio &&
+      !this.audio.paused
+    ) {
+      this.stop();
+      return;
+    }
+
+    this.stop();
+
+    const file = await getFile();
+    const url = URL.createObjectURL(file);
+    const audio = new Audio(url);
+    audio.loop = loopEnabled;
+
+    audio.addEventListener("ended", () => {
+      this.clear();
+    });
+
+    audio.addEventListener("error", () => {
+      this.clear();
+    });
+
+    this.audio = audio;
+    this.objectUrl = url;
+    this.currentSampleId = sample.id;
+    this.onPlaybackChange(sample.id);
+
+    try {
+      await audio.play();
+      if (this.audio === audio && this.currentSampleId === sample.id) {
+        this.onPlaybackChange(sample.id);
+      }
+    } catch (error) {
+      this.clear();
+      throw error;
     }
   }
 }

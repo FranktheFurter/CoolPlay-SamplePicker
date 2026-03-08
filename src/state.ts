@@ -8,6 +8,7 @@ export const initialAppState: AppState = {
   selectedSampleId: null,
   slotCounter: 1,
   loopEnabled: false,
+  autoplayEnabled: false,
   query: "",
   showAssignedOnly: false,
   currentDirectoryId: null,

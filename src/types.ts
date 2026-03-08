@@ -42,6 +42,7 @@ export interface AppState {
   selectedSampleId: string | null;
   slotCounter: number;
   loopEnabled: boolean;
+  autoplayEnabled: boolean;
   query: string;
   showAssignedOnly: boolean;
   currentDirectoryId: string | null;

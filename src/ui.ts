@@ -1,16 +1,23 @@
 import { isBrowserAudioExtensionSupported } from "./audioSupport";
+import { fuzzyMatch, normalizeFuzzyQuery } from "./fuzzy";
 import type { AppState, SampleRecord, WaveformPreview } from "./types";
 
 interface UIHandlers {
   onPickDirectory: () => void | Promise<void>;
   onRefreshScan: () => void | Promise<void>;
   onResetAssignments: () => void | Promise<void>;
+  onSelectRandomSample: () => string | null;
+  onSelectPreviousSample: () => string | null;
+  onSelectNextSample: () => string | null;
+  onPlaySelectedSample: () => void | Promise<void>;
+  onWriteSelectedSample: () => void | Promise<void>;
   onSearchChange: (query: string) => void;
   onAssignedOnlyChange: (showAssignedOnly: boolean) => void;
   onSlotCounterChange: (slotNumber: number) => void;
   onSlotCounterAdjust: (delta: number) => void;
   onSlotCategoryActivate: (rangeStart: number, rangeEnd: number) => void;
   onLoopEnabledChange: (loopEnabled: boolean) => void;
+  onAutoplayEnabledChange: (autoplayEnabled: boolean) => void;
   getPlaybackProgress: (
     sampleId: string,
     fallbackDurationSeconds: number,
@@ -52,6 +59,9 @@ const SLOT_CATEGORY_DEFINITIONS: SlotCategoryDefinition[] = [
 
 const DEFAULT_VIRTUAL_ROW_HEIGHT = 72;
 const VIRTUAL_OVERSCAN_ROWS = 8;
+const DEFAULT_VISIBLE_PATH_SEGMENTS = 4;
+const PATH_MATCH_CONTEXT_CHARACTERS = 24;
+type ScrollAlignment = "start" | "center";
 
 function formatCount(count: number): string {
   return `${count} Sample${count === 1 ? "" : "s"}`;
@@ -182,6 +192,7 @@ function createRow(
   sample: SampleRecord,
   currentAudioId: string | null,
   selectedSampleId: string | null,
+  normalizedQuery: string,
 ): HTMLDivElement {
   const row = document.createElement("div");
   row.className =
@@ -190,12 +201,14 @@ function createRow(
 
   const name = document.createElement("div");
   name.className = "sample-name";
-  name.textContent = sample.name;
+  name.title = sample.name;
+  applyFuzzyHighlight(name, sample.name, normalizedQuery);
 
   const path = document.createElement("div");
   path.className = "sample-path";
   path.title = sample.relativePath;
-  path.textContent = formatPathPreview(sample.relativePath);
+  const pathPreview = formatPathPreview(sample.relativePath, normalizedQuery);
+  applyFuzzyHighlight(path, pathPreview, normalizedQuery);
 
   const category = document.createElement("div");
   const categoryBadge = document.createElement("span");
@@ -237,26 +250,96 @@ function createRow(
   return row;
 }
 
-function formatPathPreview(relativePath: string): string {
-  const normalizedPath = relativePath.replace(/\\/g, "/");
+function applyFuzzyHighlight(
+  element: HTMLElement,
+  text: string,
+  normalizedQuery: string,
+): void {
+  if (!normalizedQuery || text.length === 0) {
+    element.textContent = text;
+    return;
+  }
+
+  const match = fuzzyMatch(text, normalizedQuery);
+
+  if (!match) {
+    element.textContent = text;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  let textIndex = 0;
+
+  for (const range of match.ranges) {
+    if (range.start > textIndex) {
+      fragment.append(document.createTextNode(text.slice(textIndex, range.start)));
+    }
+
+    const highlight = document.createElement("span");
+    highlight.className = "fuzzy-hit";
+    highlight.textContent = text.slice(range.start, range.end);
+    fragment.append(highlight);
+    textIndex = range.end;
+  }
+
+  if (textIndex < text.length) {
+    fragment.append(document.createTextNode(text.slice(textIndex)));
+  }
+
+  element.replaceChildren(fragment);
+}
+
+function buildDefaultPathPreview(normalizedPath: string): string {
   const segments = normalizedPath
     .split("/")
     .map((segment) => segment.trim())
     .filter((segment) => segment.length > 0);
 
   if (segments.length === 0) {
-    return relativePath;
+    return normalizedPath;
   }
 
-  const directories = segments.length > 1 ? segments.slice(0, -1) : segments;
-  const visibleDirectories = directories.slice(0, 3);
-
-  if (visibleDirectories.length === 0) {
-    return "/";
+  if (segments.length <= DEFAULT_VISIBLE_PATH_SEGMENTS) {
+    return segments.join("/");
   }
 
-  const suffix = directories.length > visibleDirectories.length ? "/..." : "";
-  return `${visibleDirectories.join("/")}${suffix}`;
+  return `.../${segments.slice(-DEFAULT_VISIBLE_PATH_SEGMENTS).join("/")}`;
+}
+
+function formatPathPreview(relativePath: string, normalizedQuery: string): string {
+  const normalizedPath = relativePath.replace(/\\/g, "/");
+
+  if (!normalizedQuery) {
+    return buildDefaultPathPreview(normalizedPath);
+  }
+
+  const match = fuzzyMatch(normalizedPath, normalizedQuery);
+
+  if (!match || match.ranges.length === 0) {
+    return buildDefaultPathPreview(normalizedPath);
+  }
+
+  const firstMatch = match.ranges[0];
+  const previewStart = Math.max(
+    0,
+    firstMatch.start - PATH_MATCH_CONTEXT_CHARACTERS,
+  );
+  const previewEnd = Math.min(
+    normalizedPath.length,
+    firstMatch.end + PATH_MATCH_CONTEXT_CHARACTERS,
+  );
+
+  let preview = normalizedPath.slice(previewStart, previewEnd);
+
+  if (previewStart > 0) {
+    preview = `...${preview}`;
+  }
+
+  if (previewEnd < normalizedPath.length) {
+    preview = `${preview}...`;
+  }
+
+  return preview;
 }
 
 export function createUI(root: HTMLElement, handlers: UIHandlers): UIController {
@@ -323,6 +406,83 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
 
         <section class="results">
           <div class="results-toolbar">
+            <div class="results-toolbar-main-actions">
+              <button
+                type="button"
+                class="toolbar-main-button"
+                data-role="random-sample"
+                title="Zufaelliges Sample aus aktueller Trefferliste auswaehlen (A)"
+              >
+                <span class="toolbar-main-button-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path
+                      d="M4 7h3l2.6 3.2M4 17h3l2.6-3.2M14.5 7H20m0 0-2.2-2.2M20 7l-2.2 2.2M14.5 17H20m0 0-2.2-2.2M20 17l-2.2 2.2"
+                    />
+                  </svg>
+                </span>
+                <span>Random</span>
+              </button>
+              <div class="toolbar-nav-stack">
+                <button
+                  type="button"
+                  class="toolbar-main-button is-nav"
+                  data-role="previous-selected"
+                  title="Vorherigen Eintrag auswaehlen (W)"
+                >
+                  <span class="toolbar-main-button-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path d="M12 5v14M6.5 10.5 12 5l5.5 5.5" />
+                    </svg>
+                  </span>
+                  <span>Previous</span>
+                </button>
+                <button
+                  type="button"
+                  class="toolbar-main-button is-play-main"
+                  data-role="play-selected"
+                  title="Ausgewaehltes Sample einmal abspielen (S)"
+                >
+                  <span class="toolbar-main-button-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path class="is-solid" d="M8 6v12l10-6z" />
+                    </svg>
+                  </span>
+                  <span>Play</span>
+                </button>
+                <button
+                  type="button"
+                  class="toolbar-main-button is-nav"
+                  data-role="next-selected"
+                  title="Naechsten Eintrag auswaehlen (X)"
+                >
+                  <span class="toolbar-main-button-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path d="M12 19V5m5.5 8.5L12 19l-5.5-5.5" />
+                    </svg>
+                  </span>
+                  <span>Next</span>
+                </button>
+              </div>
+              <button
+                type="button"
+                class="toolbar-main-button is-write"
+                data-role="write-selected"
+                title="Ausgewaehltes Sample auf den aktuellen Counter schreiben (D)"
+              >
+                <span class="toolbar-main-button-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path
+                      d="M6 5h9l3 3v11H6zM15 5v4h4M9 14h6M9 17h6M9 11h3"
+                    />
+                  </svg>
+                </span>
+                <span>Write</span>
+              </button>
+              <label class="toolbar-toggle">
+                <input type="checkbox" data-role="autoplay-toggle" />
+                <span>Autoplay</span>
+              </label>
+            </div>
             <button
               type="button"
               class="danger-button"
@@ -369,6 +529,24 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   const resetAssignmentsButton = root.querySelector<HTMLButtonElement>(
     '[data-role="reset-assignments"]',
   );
+  const randomSampleButton = root.querySelector<HTMLButtonElement>(
+    '[data-role="random-sample"]',
+  );
+  const previousSelectedButton = root.querySelector<HTMLButtonElement>(
+    '[data-role="previous-selected"]',
+  );
+  const playSelectedButton = root.querySelector<HTMLButtonElement>(
+    '[data-role="play-selected"]',
+  );
+  const nextSelectedButton = root.querySelector<HTMLButtonElement>(
+    '[data-role="next-selected"]',
+  );
+  const writeSelectedButton = root.querySelector<HTMLButtonElement>(
+    '[data-role="write-selected"]',
+  );
+  const autoplayToggleInput = root.querySelector<HTMLInputElement>(
+    '[data-role="autoplay-toggle"]',
+  );
   const searchInput = root.querySelector<HTMLInputElement>('[data-role="search"]');
   const assignedOnlyInput = root.querySelector<HTMLInputElement>(
     '[data-role="assigned-only"]',
@@ -411,6 +589,12 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     !pickDirectoryButton ||
     !refreshScanButton ||
     !resetAssignmentsButton ||
+    !randomSampleButton ||
+    !previousSelectedButton ||
+    !playSelectedButton ||
+    !nextSelectedButton ||
+    !writeSelectedButton ||
+    !autoplayToggleInput ||
     !searchInput ||
     !assignedOnlyInput ||
     !statusElement ||
@@ -451,10 +635,12 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   let virtualSamples: SampleRecord[] = [];
   let virtualSelectedSampleId: string | null = null;
   let virtualCurrentAudioId: string | null = null;
+  let virtualNormalizedQuery = "";
   let virtualRowHeight = DEFAULT_VIRTUAL_ROW_HEIGHT;
   let virtualListMounted = false;
   let virtualRenderFrameId: number | null = null;
   let virtualForceRenderRequested = false;
+  let pendingCategoryFirstResultScroll = false;
   let lastVirtualStartIndex = -1;
   let lastVirtualEndIndex = -1;
   let lastVirtualTotalCount = -1;
@@ -566,7 +752,12 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       }
 
       fragment.append(
-        createRow(sample, virtualCurrentAudioId, virtualSelectedSampleId),
+        createRow(
+          sample,
+          virtualCurrentAudioId,
+          virtualSelectedSampleId,
+          virtualNormalizedQuery,
+        ),
       );
     }
 
@@ -588,6 +779,81 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       virtualForceRenderRequested = false;
       renderVirtualRows(shouldForce);
     });
+  }
+
+  function scrollSampleInResults(
+    sampleId: string,
+    alignment: ScrollAlignment,
+  ): boolean {
+    if (!virtualListMounted || virtualSamples.length === 0) {
+      return false;
+    }
+
+    const targetIndex = virtualSamples.findIndex((sample) => sample.id === sampleId);
+
+    if (targetIndex < 0) {
+      return false;
+    }
+
+    const rowHeight = readVirtualRowHeight();
+    const viewportHeight = Math.max(rowHeight, resultsBodyElement.clientHeight);
+    const totalHeight = virtualSamples.length * rowHeight;
+    const maxScrollTop = Math.max(0, totalHeight - viewportHeight);
+    const targetScrollTop =
+      alignment === "center"
+        ? targetIndex * rowHeight - (viewportHeight - rowHeight) / 2
+        : targetIndex * rowHeight;
+    const clampedScrollTop = Math.max(
+      0,
+      Math.min(maxScrollTop, targetScrollTop),
+    );
+
+    resultsBodyElement.scrollTop = Math.round(clampedScrollTop);
+    invalidateVirtualWindow();
+    scheduleVirtualRowsRender(true);
+    return true;
+  }
+
+  function selectAndCenter(
+    selectionHandler: () => string | null,
+    alignment: ScrollAlignment,
+  ): void {
+    const sampleId = selectionHandler();
+
+    if (!sampleId) {
+      return;
+    }
+
+    if (scrollSampleInResults(sampleId, alignment)) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      scrollSampleInResults(sampleId, alignment);
+    });
+  }
+
+  function isEditableTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+
+    if (target.isContentEditable) {
+      return true;
+    }
+
+    const tagName = target.tagName;
+
+    return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
+  }
+
+  function triggerToolbarButton(button: HTMLButtonElement): boolean {
+    if (button.disabled) {
+      return false;
+    }
+
+    button.click();
+    return true;
   }
 
   function getPlayheadProgress(): number | null {
@@ -699,6 +965,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
           return;
         }
 
+        pendingCategoryFirstResultScroll = true;
         triggerSearch(inputElement.value);
         handlers.onSlotCategoryActivate(definition.start, definition.end);
       });
@@ -798,6 +1065,31 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     void handlers.onResetAssignments();
   });
 
+  randomSampleButton.addEventListener("click", () => {
+    selectAndCenter(handlers.onSelectRandomSample, "center");
+  });
+
+  previousSelectedButton.addEventListener("click", () => {
+    selectAndCenter(handlers.onSelectPreviousSample, "center");
+  });
+
+  playSelectedButton.addEventListener("click", () => {
+    void handlers.onPlaySelectedSample();
+  });
+
+  nextSelectedButton.addEventListener("click", () => {
+    selectAndCenter(handlers.onSelectNextSample, "center");
+  });
+
+  writeSelectedButton.addEventListener("click", () => {
+    void handlers.onWriteSelectedSample();
+  });
+
+  autoplayToggleInput.addEventListener("change", (event) => {
+    const target = event.currentTarget as HTMLInputElement;
+    handlers.onAutoplayEnabledChange(target.checked);
+  });
+
   searchInput.addEventListener("input", (event) => {
     const target = event.currentTarget as HTMLInputElement;
     handlers.onSearchChange(target.value);
@@ -836,6 +1128,37 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   loopToggleInput.addEventListener("change", (event) => {
     const target = event.currentTarget as HTMLInputElement;
     handlers.onLoopEnabledChange(target.checked);
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (
+      event.defaultPrevented ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      isEditableTarget(event.target)
+    ) {
+      return;
+    }
+
+    const key = event.key.toLowerCase();
+    let handled = false;
+
+    if (key === "a") {
+      handled = triggerToolbarButton(randomSampleButton);
+    } else if (key === "w") {
+      handled = triggerToolbarButton(previousSelectedButton);
+    } else if (key === "s") {
+      handled = triggerToolbarButton(playSelectedButton);
+    } else if (key === "x") {
+      handled = triggerToolbarButton(nextSelectedButton);
+    } else if (key === "d") {
+      handled = triggerToolbarButton(writeSelectedButton);
+    }
+
+    if (handled) {
+      event.preventDefault();
+    }
   });
 
   resultsBodyElement.addEventListener("scroll", () => {
@@ -905,10 +1228,38 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
         state.isScanning ||
         state.currentDirectoryId === null ||
         !state.samples.some((sample) => sample.slotNumber !== null);
+      randomSampleButton.disabled =
+        state.isScanning ||
+        state.currentDirectoryId === null ||
+        state.filteredSamples.length === 0;
+      previousSelectedButton.disabled =
+        state.isScanning ||
+        state.currentDirectoryId === null ||
+        state.filteredSamples.length === 0;
+      nextSelectedButton.disabled =
+        state.isScanning ||
+        state.currentDirectoryId === null ||
+        state.filteredSamples.length === 0;
+
+      const selectedSample =
+        state.selectedSampleId === null
+          ? null
+          : state.samples.find((sample) => sample.id === state.selectedSampleId) ?? null;
+      const canUseSelectedSampleActions =
+        !state.isScanning &&
+        state.currentDirectoryId !== null &&
+        selectedSample !== null;
+      playSelectedButton.disabled =
+        !canUseSelectedSampleActions ||
+        selectedSample === null ||
+        !isBrowserAudioExtensionSupported(selectedSample.extension);
+      writeSelectedButton.disabled = !canUseSelectedSampleActions;
+
       searchInput.value = state.query;
       assignedOnlyInput.checked = state.showAssignedOnly;
       slotCounterInputElement.value = String(state.slotCounter);
       loopToggleInput.checked = state.loopEnabled;
+      autoplayToggleInput.checked = state.autoplayEnabled;
 
       statusElement.textContent = formatStatus(state);
       countElement.textContent = formatCount(state.filteredSamples.length);
@@ -943,6 +1294,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       syncSlotCounterPosition();
 
       if (state.filteredSamples.length === 0) {
+        pendingCategoryFirstResultScroll = false;
         clearVirtualRenderFrame();
         invalidateVirtualWindow();
         virtualSamples = [];
@@ -964,7 +1316,22 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       virtualSamples = state.filteredSamples;
       virtualSelectedSampleId = state.selectedSampleId;
       virtualCurrentAudioId = state.currentAudioId;
+      virtualNormalizedQuery = normalizeFuzzyQuery(state.query);
       ensureVirtualListMounted();
+
+      if (pendingCategoryFirstResultScroll) {
+        pendingCategoryFirstResultScroll = false;
+        const firstSampleId = state.filteredSamples[0]?.id ?? null;
+
+        if (firstSampleId) {
+          if (!scrollSampleInResults(firstSampleId, "start")) {
+            window.requestAnimationFrame(() => {
+              scrollSampleInResults(firstSampleId, "start");
+            });
+          }
+        }
+      }
+
       scheduleVirtualRowsRender(true);
     },
   };

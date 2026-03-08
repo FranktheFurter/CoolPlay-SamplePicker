@@ -401,6 +401,10 @@ function handleLoopEnabledChange(loopEnabled: boolean): void {
   commitState({ loopEnabled });
 }
 
+function handleAutoplayEnabledChange(autoplayEnabled: boolean): void {
+  commitState({ autoplayEnabled });
+}
+
 function handleSelectSample(sampleId: string): void {
   const state = store.getState();
 
@@ -413,6 +417,85 @@ function handleSelectSample(sampleId: string): void {
   }
 
   commitState({ selectedSampleId: sampleId });
+}
+
+function handleSelectRandomSample(): string | null {
+  const state = store.getState();
+  const candidates = state.filteredSamples;
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  if (candidates.length === 1) {
+    handleSelectSample(candidates[0].id);
+    return candidates[0].id;
+  }
+
+  const currentSelectedSampleId = state.selectedSampleId;
+  const pool =
+    currentSelectedSampleId === null
+      ? candidates
+      : candidates.filter((sample) => sample.id !== currentSelectedSampleId);
+  const randomIndex = Math.floor(Math.random() * pool.length);
+  const randomSample = pool[randomIndex];
+
+  if (!randomSample) {
+    return null;
+  }
+
+  handleSelectSample(randomSample.id);
+  return randomSample.id;
+}
+
+function getRelativeSelectedSampleId(step: -1 | 1): string | null {
+  const state = store.getState();
+  const candidates = state.filteredSamples;
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  if (state.selectedSampleId === null) {
+    return candidates[0].id;
+  }
+
+  const currentIndex = candidates.findIndex(
+    (sample) => sample.id === state.selectedSampleId,
+  );
+
+  if (currentIndex === -1) {
+    return candidates[0].id;
+  }
+
+  const nextIndex = Math.max(
+    0,
+    Math.min(candidates.length - 1, currentIndex + step),
+  );
+
+  return candidates[nextIndex]?.id ?? null;
+}
+
+function handleSelectPreviousSample(): string | null {
+  const previousSampleId = getRelativeSelectedSampleId(-1);
+
+  if (!previousSampleId) {
+    return null;
+  }
+
+  handleSelectSample(previousSampleId);
+  return previousSampleId;
+}
+
+function handleSelectNextSample(): string | null {
+  const nextSampleId = getRelativeSelectedSampleId(1);
+
+  if (!nextSampleId) {
+    return null;
+  }
+
+  handleSelectSample(nextSampleId);
+  return nextSampleId;
 }
 
 function handlePlaybackProgress(
@@ -469,7 +552,20 @@ async function handleWriteSample(sampleId: string): Promise<void> {
   }
 }
 
-async function handleTogglePlay(sampleId: string): Promise<void> {
+async function handleWriteSelectedSample(): Promise<void> {
+  const selectedSampleId = store.getState().selectedSampleId;
+
+  if (!selectedSampleId) {
+    return;
+  }
+
+  await handleWriteSample(selectedSampleId);
+}
+
+async function playSample(
+  sampleId: string,
+  mode: "toggle" | "once" | "autoplay",
+): Promise<void> {
   if (!activeDirectory) {
     return;
   }
@@ -483,10 +579,12 @@ async function handleTogglePlay(sampleId: string): Promise<void> {
   handleSelectSample(sample.id);
 
   if (!isBrowserAudioExtensionSupported(sample.extension)) {
-    commitState({
-      currentAudioId: null,
-      error: `Audio-Preview fuer .${sample.extension} wird von diesem Browser nicht unterstuetzt.`,
-    });
+    if (mode !== "autoplay") {
+      commitState({
+        currentAudioId: null,
+        error: `Audio-Preview fuer .${sample.extension} wird von diesem Browser nicht unterstuetzt.`,
+      });
+    }
     return;
   }
 
@@ -495,6 +593,17 @@ async function handleTogglePlay(sampleId: string): Promise<void> {
 
     if (!hasPermission) {
       throw new Error("Leseberechtigung fuer Audio-Preview wurde verweigert.");
+    }
+
+    if (mode === "once") {
+      await audioPreview.playOnce(
+        {
+          id: sample.id,
+        },
+        async () =>
+          getFileFromRelativePath(activeDirectory!.handle, sample.relativePath),
+      );
+      return;
     }
 
     await audioPreview.toggle(
@@ -522,6 +631,20 @@ async function handleTogglePlay(sampleId: string): Promise<void> {
   }
 }
 
+async function handleTogglePlay(sampleId: string): Promise<void> {
+  await playSample(sampleId, "toggle");
+}
+
+async function handlePlaySelectedSample(): Promise<void> {
+  const selectedSampleId = store.getState().selectedSampleId;
+
+  if (!selectedSampleId) {
+    return;
+  }
+
+  await playSample(selectedSampleId, "once");
+}
+
 const appRoot = document.querySelector<HTMLDivElement>("#app");
 
 if (!appRoot) {
@@ -532,12 +655,18 @@ const ui = createUI(appRoot, {
   onPickDirectory: handlePickDirectory,
   onRefreshScan: handleRefreshScan,
   onResetAssignments: handleResetAssignments,
+  onSelectRandomSample: handleSelectRandomSample,
+  onSelectPreviousSample: handleSelectPreviousSample,
+  onSelectNextSample: handleSelectNextSample,
+  onPlaySelectedSample: handlePlaySelectedSample,
+  onWriteSelectedSample: handleWriteSelectedSample,
   onSearchChange: handleSearchChange,
   onAssignedOnlyChange: handleAssignedOnlyChange,
   onSlotCounterChange: handleSlotCounterChange,
   onSlotCounterAdjust: handleSlotCounterAdjust,
   onSlotCategoryActivate: handleSlotCategoryActivate,
   onLoopEnabledChange: handleLoopEnabledChange,
+  onAutoplayEnabledChange: handleAutoplayEnabledChange,
   getPlaybackProgress: handlePlaybackProgress,
   onSelectSample: handleSelectSample,
   onWriteSample: handleWriteSample,
@@ -550,6 +679,10 @@ store.subscribe((state) => {
   if (state.selectedSampleId !== lastSelectedSampleId) {
     lastSelectedSampleId = state.selectedSampleId;
     void loadWaveformForSelection(state.selectedSampleId);
+
+    if (state.autoplayEnabled && state.selectedSampleId) {
+      void playSample(state.selectedSampleId, "autoplay");
+    }
   }
 });
 
