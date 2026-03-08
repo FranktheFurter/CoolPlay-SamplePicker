@@ -346,19 +346,20 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       </section>
 
       <aside class="slot-panel">
-        <div class="slot-panel-head">
-          <span class="slot-counter-label">Writehead</span>
-          <input
-            type="number"
-            min="1"
-            max="999"
-            step="1"
-            class="slot-counter-input"
-            data-role="slot-counter"
-            aria-label="Writehead Counter"
-          />
+        <div class="slot-panel-layout">
+          <div class="slot-categories" data-role="slot-categories"></div>
+          <div class="slot-counter-rail" data-role="slot-counter-rail">
+            <input
+              type="number"
+              min="1"
+              max="999"
+              step="1"
+              class="slot-counter-input"
+              data-role="slot-counter"
+              aria-label="Writehead Counter"
+            />
+          </div>
         </div>
-        <div class="slot-categories" data-role="slot-categories"></div>
       </aside>
     </main>
   `;
@@ -403,6 +404,9 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   const slotCounterInput = root.querySelector<HTMLInputElement>(
     '[data-role="slot-counter"]',
   );
+  const slotCounterRail = root.querySelector<HTMLDivElement>(
+    '[data-role="slot-counter-rail"]',
+  );
   const slotCategories = root.querySelector<HTMLDivElement>(
     '[data-role="slot-categories"]',
   );
@@ -424,6 +428,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     !waveformPlayheadCanvas ||
     !resultsBody ||
     !slotCounterInput ||
+    !slotCounterRail ||
     !slotCategories
   ) {
     throw new Error("UI konnte nicht initialisiert werden.");
@@ -433,6 +438,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   const waveformPlayheadCanvasElement = waveformPlayheadCanvas;
   const resultsBodyElement = resultsBody;
   const slotCategoriesElement = slotCategories;
+  const slotCounterRailElement = slotCounterRail;
   const slotCounterInputElement = slotCounterInput;
   const searchInputElement = searchInput;
   const slotCategoryElements: SlotCategoryElements[] = [];
@@ -740,6 +746,40 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     }
   }
 
+  function syncSlotCounterPosition(): void {
+    const railRect = slotCounterRailElement.getBoundingClientRect();
+    const inputHeight = slotCounterInputElement.offsetHeight;
+
+    if (inputHeight <= 0 || railRect.height <= 0) {
+      slotCounterInputElement.style.setProperty("--slot-counter-offset", "0px");
+      return;
+    }
+
+    const activePixel = slotCategoriesElement.querySelector<HTMLElement>(
+      ".slot-pixel.is-counter",
+    );
+    const fallbackCategory = slotCategoriesElement.querySelector<HTMLElement>(
+      ".slot-category",
+    );
+    const targetElement = activePixel ?? fallbackCategory;
+
+    if (!targetElement) {
+      slotCounterInputElement.style.setProperty("--slot-counter-offset", "0px");
+      return;
+    }
+
+    const targetRect = targetElement.getBoundingClientRect();
+    const unclampedOffset =
+      targetRect.top - railRect.top + targetRect.height / 2 - inputHeight / 2;
+    const maxOffset = Math.max(0, railRect.height - inputHeight);
+    const clampedOffset = Math.max(0, Math.min(maxOffset, unclampedOffset));
+
+    slotCounterInputElement.style.setProperty(
+      "--slot-counter-offset",
+      `${Math.round(clampedOffset)}px`,
+    );
+  }
+
   createSlotCategoryElements();
 
   pickDirectoryButton.addEventListener("click", () => {
@@ -812,6 +852,8 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
 
   if (typeof ResizeObserver !== "undefined") {
     const resizeObserver = new ResizeObserver(() => {
+      syncSlotCounterPosition();
+
       if (!virtualListMounted || virtualSamples.length === 0) {
         return;
       }
@@ -821,6 +863,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     });
 
     resizeObserver.observe(resultsBodyElement);
+    resizeObserver.observe(slotCategoriesElement);
   }
 
   resultsBodyElement.addEventListener("click", (event) => {
@@ -901,6 +944,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       drawWaveform(waveformBaseCanvasElement, latestWaveform);
       syncPlayheadAnimation();
       renderSlotMatrix(state);
+      syncSlotCounterPosition();
 
       if (state.filteredSamples.length === 0) {
         clearVirtualRenderFrame();
