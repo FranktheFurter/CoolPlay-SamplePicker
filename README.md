@@ -14,4 +14,4 @@ Kleiner lokaler Prototyp fuer eine browserbasierte Sample-Browsing-App.
 - Die App nutzt die File System Access API und ist fuer aktuelle Desktop-Versionen von Chrome oder Edge gedacht.
 - Der Index und die gemerkten Samples werden in IndexedDB im Browser gespeichert.
 - `Ordner aktualisieren` scannt den zuletzt ausgewaehlten Ordner erneut.
-
+- Es werden nur `.wav`-Dateien indexiert.

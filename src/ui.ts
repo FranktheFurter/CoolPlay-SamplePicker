@@ -1,3 +1,4 @@
+import { isBrowserAudioExtensionSupported } from "./audioSupport";
 import type { AppState, SampleRecord, WaveformPreview } from "./types";
 
 interface UIHandlers {
@@ -206,12 +207,17 @@ function createRow(
   actions.className = "row-actions";
 
   const playButton = document.createElement("button");
+  const isPlayable = isBrowserAudioExtensionSupported(sample.extension);
   playButton.className =
     sample.id === currentAudioId ? "row-button active" : "row-button";
   playButton.type = "button";
   playButton.dataset.action = "play";
   playButton.dataset.id = sample.id;
   playButton.textContent = sample.id === currentAudioId ? "Stop" : "Play";
+  playButton.disabled = !isPlayable;
+  playButton.title = isPlayable
+    ? ""
+    : `Audio-Preview fuer .${sample.extension} wird vom Browser nicht unterstuetzt.`;
 
   const slotIndicator = document.createElement("span");
   slotIndicator.className = "slot-indicator";

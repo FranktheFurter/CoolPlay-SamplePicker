@@ -1,4 +1,5 @@
 import { AudioPreviewController } from "./audioPreview";
+import { isBrowserAudioExtensionSupported } from "./audioSupport";
 import {
   getCurrentDirectory,
   getSamplesForDirectory,
@@ -13,6 +14,7 @@ import {
   scanDirectory,
 } from "./fileScanner";
 import { filterSamples } from "./search";
+import { isSupportedSampleExtension } from "./sampleFormats";
 import { createAppStore, initialAppState } from "./state";
 import "./styles.css";
 import type { AppState, PersistedDirectory, SampleRecord } from "./types";
@@ -129,6 +131,10 @@ function buildSlotMap(samples: SampleRecord[]): Map<string, number> {
   );
 }
 
+function filterSupportedSamples(samples: SampleRecord[]): SampleRecord[] {
+  return samples.filter((sample) => isSupportedSampleExtension(sample.extension));
+}
+
 async function loadWaveformForSelection(sampleId: string | null): Promise<void> {
   const token = ++waveformRequestToken;
 
@@ -141,6 +147,14 @@ async function loadWaveformForSelection(sampleId: string | null): Promise<void> 
 
   if (!sample) {
     commitState({ currentWaveform: null });
+    return;
+  }
+
+  if (!isBrowserAudioExtensionSupported(sample.extension)) {
+    commitState({
+      currentWaveform: null,
+      error: null,
+    });
     return;
   }
 
@@ -176,12 +190,19 @@ async function loadWaveformForSelection(sampleId: string | null): Promise<void> 
       return;
     }
 
+    const isUnsupportedDecodeError =
+      (error instanceof DOMException && error.name === "EncodingError") ||
+      (error instanceof Error &&
+        error.message.toLowerCase().includes("decode audio data"));
+
     commitState({
       currentWaveform: null,
       error:
-        error instanceof Error
-          ? error.message
-          : "Waveform konnte nicht geladen werden.",
+        isUnsupportedDecodeError
+          ? null
+          : error instanceof Error
+            ? error.message
+            : "Waveform konnte nicht geladen werden.",
     });
   }
 }
@@ -205,7 +226,9 @@ async function runScan(directory: PersistedDirectory): Promise<void> {
       throw new Error("Leseberechtigung fuer den Ordner wurde nicht erteilt.");
     }
 
-    const previousSamples = await getSamplesForDirectory(directory.id);
+    const previousSamples = filterSupportedSamples(
+      await getSamplesForDirectory(directory.id),
+    );
     const slotMap = buildSlotMap(previousSamples);
     const scannedSamples = await scanDirectory(directory.handle, directory.id);
 
@@ -243,7 +266,13 @@ async function hydrateFromIndexedDb(): Promise<void> {
 
     activeDirectory = directory;
 
-    const samples = await getSamplesForDirectory(directory.id);
+    const persistedSamples = await getSamplesForDirectory(directory.id);
+    const samples = filterSupportedSamples(persistedSamples);
+
+    if (samples.length !== persistedSamples.length) {
+      await replaceSamplesForDirectory(directory.id, samples);
+    }
+
     commitState({
       currentDirectoryId: directory.id,
       currentDirectoryName: directory.name,
@@ -453,6 +482,14 @@ async function handleTogglePlay(sampleId: string): Promise<void> {
 
   handleSelectSample(sample.id);
 
+  if (!isBrowserAudioExtensionSupported(sample.extension)) {
+    commitState({
+      currentAudioId: null,
+      error: `Audio-Preview fuer .${sample.extension} wird von diesem Browser nicht unterstuetzt.`,
+    });
+    return;
+  }
+
   try {
     const hasPermission = await ensureReadPermission(activeDirectory.handle);
 
@@ -468,12 +505,19 @@ async function handleTogglePlay(sampleId: string): Promise<void> {
         getFileFromRelativePath(activeDirectory!.handle, sample.relativePath),
     );
   } catch (error) {
+    const isUnsupportedMediaError =
+      (error instanceof DOMException && error.name === "NotSupportedError") ||
+      (error instanceof Error &&
+        error.message.toLowerCase().includes("no supported source"));
+
     commitState({
       currentAudioId: null,
       error:
-        error instanceof Error
-          ? error.message
-          : "Audio-Preview konnte nicht gestartet werden.",
+        isUnsupportedMediaError
+          ? `Audio-Preview fuer "${sample.name}" kann nicht abgespielt werden. Dateiformat oder Codec werden vom Browser nicht unterstuetzt.`
+          : error instanceof Error
+            ? error.message
+            : "Audio-Preview konnte nicht gestartet werden.",
     });
   }
 }

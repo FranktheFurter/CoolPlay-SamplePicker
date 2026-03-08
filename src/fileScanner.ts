@@ -1,4 +1,5 @@
 import type { CategoryGuess, SampleRecord } from "./types";
+import { isSupportedSampleExtension } from "./sampleFormats";
 
 const CATEGORY_RULES: Array<{
   category: CategoryGuess;
@@ -14,7 +15,6 @@ const CATEGORY_RULES: Array<{
   { category: "bass", pattern: /\b(bass|sub)\b/ },
 ];
 
-const AUDIO_EXTENSIONS = new Set(["wav", "aif", "aiff", "mp3", "flac"]);
 const MACOS_METADATA_DIRECTORIES = new Set(["__macosx"]);
 
 function shouldSkipEntry(
@@ -101,7 +101,7 @@ export async function scanDirectory(
 
       const extension = getExtension(entryName);
 
-      if (!AUDIO_EXTENSIONS.has(extension)) {
+      if (!isSupportedSampleExtension(extension)) {
         continue;
       }
 
