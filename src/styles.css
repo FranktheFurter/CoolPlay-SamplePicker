@@ -168,66 +168,6 @@ input[type="search"] {
   align-items: center;
 }
 
-.randomizer-controls {
-  margin-top: 7px;
-  padding-top: 7px;
-  border-top: 2px solid rgba(62, 51, 86, 0.5);
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.randomizer-run-button {
-  padding: 0.5rem 0.72rem;
-  font-family: var(--font-tracker);
-  font-size: 1.25rem;
-  line-height: 0.9;
-  letter-spacing: 0.02em;
-}
-
-.randomizer-ratio {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-tracker);
-  font-size: 1.1rem;
-  color: var(--muted);
-}
-
-.randomizer-ratio input[type="range"] {
-  width: clamp(100px, 18vw, 200px);
-  accent-color: var(--accent);
-}
-
-.randomizer-ratio input[type="number"] {
-  width: 60px;
-  border: 2px solid var(--border);
-  border-radius: 6px;
-  padding: 0.22rem 0.28rem;
-  background: #1c1828;
-  color: var(--text);
-  font-family: var(--font-tracker);
-  font-size: 1.05rem;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  appearance: textfield;
-  -moz-appearance: textfield;
-}
-
-.randomizer-ratio input[type="number"]::-webkit-outer-spin-button,
-.randomizer-ratio input[type="number"]::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-.randomizer-hint {
-  color: var(--muted);
-  font-family: var(--font-tracker);
-  font-size: 1.0rem;
-  letter-spacing: 0.02em;
-}
-
 .search-wrap {
   min-width: 220px;
 }
@@ -301,6 +241,10 @@ input[type="search"] {
   font-family: var(--font-tracker);
   font-size: 1.2rem;
   letter-spacing: 0.03em;
+}
+
+.statusbar [data-role="assigned-size"] {
+  color: #5ee8c8;
 }
 
 .scan-progress {
@@ -881,6 +825,15 @@ input[type="search"] {
   letter-spacing: 0.02em;
 }
 
+.slot-category-size {
+  font-family: var(--font-tracker);
+  font-size: 0.82rem;
+  color: #5ee8c8;
+  text-align: left;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
 .slot-category-input {
   width: 100%;
   min-width: 0;
@@ -963,14 +916,6 @@ input[type="search"] {
 
   .headline {
     align-items: center;
-  }
-
-  .randomizer-controls {
-    align-items: stretch;
-  }
-
-  .randomizer-ratio {
-    flex-wrap: wrap;
   }
 
   .slot-panel {

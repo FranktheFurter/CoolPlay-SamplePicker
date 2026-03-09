@@ -9,7 +9,6 @@ export const initialAppState: AppState = {
   slotCounter: 1,
   activeSlotAssignedCount: 0,
   activeSlotRangeStart: 1,
-  randomizerStepRatio: 0.75,
   loopEnabled: false,
   autoplayEnabled: false,
   query: "",

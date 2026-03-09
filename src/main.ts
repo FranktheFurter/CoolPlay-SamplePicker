@@ -22,7 +22,6 @@ import type {
   AppState,
   ExportAssignmentsRequest,
   PersistedDirectory,
-  RandomizerRequest,
   SampleRecord,
 } from "./types";
 import { createUI } from "./ui";
@@ -38,16 +37,7 @@ let waveformRequestToken = 0;
 let lastSelectedSampleId: string | null = null;
 const MIN_SLOT_NUMBER = 1;
 const MAX_SLOT_NUMBER = 999;
-const RANDOMIZER_SLOTS_PER_CATEGORY = 50;
 const EXPORT_FOLDER_PREFIX = "sample-picker-export";
-
-function clampRandomizerStepRatio(stepRatio: number): number {
-  if (!Number.isFinite(stepRatio)) {
-    return initialAppState.randomizerStepRatio;
-  }
-
-  return Math.max(0, Math.min(1, stepRatio));
-}
 
 function sanitizeFileSystemName(value: string): string {
   return value
@@ -60,53 +50,6 @@ function sanitizeFileSystemName(value: string): string {
 
 function padSlotNumber(slotNumber: number): string {
   return String(slotNumber).padStart(3, "0");
-}
-
-function toRandomInt(maxExclusive: number): number {
-  return Math.floor(Math.random() * maxExclusive);
-}
-
-function getRandomUnusedIndex(
-  totalCount: number,
-  usedIndices: Set<number>,
-): number | null {
-  const availableIndices: number[] = [];
-
-  for (let index = 0; index < totalCount; index += 1) {
-    if (!usedIndices.has(index)) {
-      availableIndices.push(index);
-    }
-  }
-
-  if (availableIndices.length === 0) {
-    return null;
-  }
-
-  return availableIndices[toRandomInt(availableIndices.length)] ?? null;
-}
-
-function getNeighborIndex(
-  previousIndex: number,
-  totalCount: number,
-  usedIndices: Set<number>,
-): number | null {
-  const candidates: number[] = [];
-  const lowerIndex = previousIndex - 1;
-  const upperIndex = previousIndex + 1;
-
-  if (lowerIndex >= 0 && !usedIndices.has(lowerIndex)) {
-    candidates.push(lowerIndex);
-  }
-
-  if (upperIndex < totalCount && !usedIndices.has(upperIndex)) {
-    candidates.push(upperIndex);
-  }
-
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  return candidates[toRandomInt(candidates.length)] ?? null;
 }
 
 function clampSlotCounter(slotNumber: number): number {
@@ -722,108 +665,6 @@ async function handleExportAssignments(
   }
 }
 
-function handleRandomizerStepRatioChange(stepRatio: number): void {
-  commitState({ randomizerStepRatio: clampRandomizerStepRatio(stepRatio) });
-}
-
-async function handleRunRandomizer(request: RandomizerRequest): Promise<void> {
-  const previousState = store.getState();
-
-  if (!previousState.currentDirectoryId || previousState.samples.length === 0) {
-    return;
-  }
-
-  const stepRatio = clampRandomizerStepRatio(request.stepRatio);
-  const categories = request.categories ?? [];
-  const baseSamples = previousState.samples.map((sample) =>
-    sample.slotNumber === null ? sample : { ...sample, slotNumber: null },
-  );
-  const sampleById = new Map(baseSamples.map((sample) => [sample.id, sample]));
-  const globallyAssignedSampleIds = new Set<string>();
-
-  for (const category of categories) {
-    const rangeStart = clampSlotCounter(
-      Math.min(category.rangeStart, category.rangeEnd),
-    );
-    const rangeEnd = clampSlotCounter(Math.max(category.rangeStart, category.rangeEnd));
-    const slotEnd = Math.min(
-      rangeEnd,
-      rangeStart + RANDOMIZER_SLOTS_PER_CATEGORY - 1,
-    );
-
-    if (slotEnd < rangeStart) {
-      continue;
-    }
-
-    const categoryQuery = category.query.trim();
-    const candidates = filterSamples(baseSamples, categoryQuery, false).filter(
-      (sample) => !globallyAssignedSampleIds.has(sample.id),
-    );
-
-    if (candidates.length === 0) {
-      continue;
-    }
-
-    const usedIndices = new Set<number>();
-    let previousIndex: number | null = null;
-
-    for (let slotNumber = rangeStart; slotNumber <= slotEnd; slotNumber += 1) {
-      let nextIndex: number | null = null;
-
-      if (previousIndex === null) {
-        nextIndex = toRandomInt(candidates.length);
-      } else if (Math.random() < stepRatio) {
-        nextIndex = getNeighborIndex(previousIndex, candidates.length, usedIndices);
-      }
-
-      if (nextIndex === null || usedIndices.has(nextIndex)) {
-        nextIndex = getRandomUnusedIndex(candidates.length, usedIndices);
-      }
-
-      if (nextIndex === null) {
-        break;
-      }
-
-      const selectedSample = candidates[nextIndex];
-
-      if (!selectedSample) {
-        break;
-      }
-
-      usedIndices.add(nextIndex);
-      previousIndex = nextIndex;
-      globallyAssignedSampleIds.add(selectedSample.id);
-
-      const sampleEntry = sampleById.get(selectedSample.id);
-
-      if (!sampleEntry) {
-        continue;
-      }
-
-      sampleEntry.slotNumber = slotNumber;
-    }
-  }
-
-  commitState({
-    samples: baseSamples,
-    randomizerStepRatio: stepRatio,
-    error: null,
-  });
-
-  try {
-    await replaceSamplesForDirectory(previousState.currentDirectoryId, baseSamples);
-  } catch (error) {
-    commitState({
-      samples: previousState.samples,
-      randomizerStepRatio: previousState.randomizerStepRatio,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Randomizer-Zuweisungen konnten nicht gespeichert werden.",
-    });
-  }
-}
-
 function handleSearchChange(query: string): void {
   commitState({ query });
 }
@@ -1167,8 +1008,6 @@ const ui = createUI(appRoot, {
   onExportAssignments: handleExportAssignments,
   onRefreshScan: handleRefreshScan,
   onResetAssignments: handleResetAssignments,
-  onRunRandomizer: handleRunRandomizer,
-  onRandomizerStepRatioChange: handleRandomizerStepRatioChange,
   onSelectRandomSample: handleSelectRandomSample,
   onSelectPreviousSample: handleSelectPreviousSample,
   onSelectNextSample: handleSelectNextSample,

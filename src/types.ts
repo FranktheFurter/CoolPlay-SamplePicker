@@ -41,7 +41,6 @@ export interface AppState {
   slotCounter: number | null;
   activeSlotAssignedCount: number;
   activeSlotRangeStart: number;
-  randomizerStepRatio: number;
   loopEnabled: boolean;
   autoplayEnabled: boolean;
   query: string;
@@ -54,17 +53,6 @@ export interface AppState {
   currentWaveform: WaveformPreview | null;
   lastScanAt: number | null;
   error: string | null;
-}
-
-export interface RandomizerCategoryConfig {
-  rangeStart: number;
-  rangeEnd: number;
-  query: string;
-}
-
-export interface RandomizerRequest {
-  stepRatio: number;
-  categories: RandomizerCategoryConfig[];
 }
 
 export interface ExportAssignmentsCategoryConfig {
