@@ -951,6 +951,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   let latestWaveform: WaveformPreview | null = null;
   let displayedWaveform: WaveformPreview | null = null;
   let displayedWaveformSignature: string | null = null;
+  let pendingWaveformSignature: string | null = null;
   let latestSelectedSampleId: string | null = null;
   let latestCurrentAudioId: string | null = null;
   let playheadFrameId: number | null = null;
@@ -1638,6 +1639,38 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     drawPlayhead(waveformPlayheadCanvasElement, getPlayheadProgress());
   }
 
+  function renderWaveformMeta(
+    waveform: WaveformPreview | null,
+    fallbackSampleName: string | null = null,
+  ): void {
+    if (waveform) {
+      waveformPanelElement.classList.add("is-active");
+      waveformTitleElement.textContent = waveform.sampleName;
+      waveformDurationElement.textContent =
+        waveform.peaks.length > 0 ? formatDuration(waveform.durationSeconds) : "--:--";
+      return;
+    }
+
+    if (fallbackSampleName) {
+      waveformPanelElement.classList.add("is-active");
+      waveformTitleElement.textContent = fallbackSampleName;
+      waveformDurationElement.textContent = "--:--";
+      return;
+    }
+
+    waveformPanelElement.classList.remove("is-active");
+    waveformTitleElement.textContent = "Kein Sample aktiv";
+    waveformDurationElement.textContent = "--:--";
+  }
+
+  function applyDisplayedWaveform(waveform: WaveformPreview | null): void {
+    displayedWaveform = waveform;
+    displayedWaveformSignature = getWaveformSignature(waveform);
+    drawWaveform(waveformBaseCanvasElement, displayedWaveform);
+    renderWaveformMeta(displayedWaveform);
+    syncPlayheadAnimation();
+  }
+
   function stopWaveformSwapAnimation(): void {
     if (waveformSwapAnimation) {
       waveformSwapAnimation.cancel();
@@ -1645,63 +1678,87 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     }
 
     waveformBaseCanvasElement.style.opacity = "1";
-    waveformBaseCanvasElement.style.transform = "translate3d(0, 0, 0)";
   }
 
-  function animateWaveformSwap(): void {
+  function runWaveformFade(
+    keyframes: Keyframe[],
+    duration: number,
+    onFinish: () => void,
+  ): void {
+    waveformSwapAnimation = waveformBaseCanvasElement.animate(keyframes, {
+      duration,
+      easing: WAVEFORM_SWAP_EASING,
+      fill: "forwards",
+    });
+    waveformSwapAnimation.addEventListener("finish", () => {
+      waveformSwapAnimation = null;
+      onFinish();
+    });
+  }
+
+  function animateWaveformSwap(nextWaveform: WaveformPreview): void {
     stopWaveformSwapAnimation();
+    pendingWaveformSignature = getWaveformSignature(nextWaveform);
 
     if (
       typeof waveformBaseCanvasElement.animate !== "function" ||
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
+      pendingWaveformSignature = null;
+      applyDisplayedWaveform(nextWaveform);
       return;
     }
 
-    waveformSwapAnimation = waveformBaseCanvasElement.animate(
-      [
-        {
-          opacity: 0.82,
-          transform: "translate3d(0, 1.5px, 0)",
+    if (displayedWaveform === null) {
+      waveformBaseCanvasElement.style.opacity = "0";
+      applyDisplayedWaveform(nextWaveform);
+      runWaveformFade(
+        [{ opacity: 0 }, { opacity: 1 }],
+        WAVEFORM_SWAP_ANIMATION_MS,
+        () => {
+          pendingWaveformSignature = null;
+          waveformBaseCanvasElement.style.opacity = "1";
         },
-        {
-          opacity: 1,
-          transform: "translate3d(0, 0, 0)",
-        },
-      ],
-      {
-        duration: WAVEFORM_SWAP_ANIMATION_MS,
-        easing: WAVEFORM_SWAP_EASING,
+      );
+      return;
+    }
+
+    const halfDuration = Math.max(80, Math.round(WAVEFORM_SWAP_ANIMATION_MS / 2));
+    runWaveformFade(
+      [{ opacity: 1 }, { opacity: 0 }],
+      halfDuration,
+      () => {
+        waveformBaseCanvasElement.style.opacity = "0";
+        applyDisplayedWaveform(nextWaveform);
+        runWaveformFade(
+          [{ opacity: 0 }, { opacity: 1 }],
+          halfDuration,
+          () => {
+            pendingWaveformSignature = null;
+            waveformBaseCanvasElement.style.opacity = "1";
+          },
+        );
       },
     );
-    waveformSwapAnimation.addEventListener("finish", () => {
-      if (waveformSwapAnimation) {
-        waveformSwapAnimation = null;
-      }
-
-      waveformBaseCanvasElement.style.opacity = "1";
-      waveformBaseCanvasElement.style.transform = "translate3d(0, 0, 0)";
-    });
   }
 
   function commitDisplayedWaveform(waveform: WaveformPreview | null): void {
     const nextSignature = getWaveformSignature(waveform);
 
     if (nextSignature === displayedWaveformSignature) {
-      displayedWaveform = waveform;
-      drawWaveform(waveformBaseCanvasElement, displayedWaveform);
+      applyDisplayedWaveform(waveform);
       return;
     }
-
-    displayedWaveform = waveform;
-    displayedWaveformSignature = nextSignature;
-    drawWaveform(waveformBaseCanvasElement, displayedWaveform);
 
     if (waveform) {
-      animateWaveformSwap();
+      if (nextSignature !== pendingWaveformSignature) {
+        animateWaveformSwap(waveform);
+      }
       return;
     }
 
+    pendingWaveformSignature = null;
+    applyDisplayedWaveform(null);
     stopWaveformSwapAnimation();
   }
 
@@ -2053,25 +2110,10 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
         drawWaveform(waveformBaseCanvasElement, null);
       }
 
-      const previewWaveform =
-        readyWaveform ??
-        displayedWaveform ??
-        (state.currentWaveform && state.currentWaveform.peaks.length === 0
-          ? state.currentWaveform
-          : null);
-
-      if (previewWaveform) {
-        waveformPanelElement.classList.add("is-active");
-        waveformTitleElement.textContent = previewWaveform.sampleName;
-        waveformDurationElement.textContent =
-          previewWaveform.peaks.length > 0
-            ? formatDuration(previewWaveform.durationSeconds)
-            : "--:--";
-      } else {
-        waveformPanelElement.classList.remove("is-active");
-        waveformTitleElement.textContent = "Kein Sample aktiv";
-        waveformDurationElement.textContent = "--:--";
-      }
+      renderWaveformMeta(
+        displayedWaveform,
+        displayedWaveform === null ? state.currentWaveform?.sampleName ?? null : null,
+      );
 
       latestSelectedSampleId = state.selectedSampleId;
       latestCurrentAudioId = state.currentAudioId;
