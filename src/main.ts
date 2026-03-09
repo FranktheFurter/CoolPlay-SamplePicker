@@ -704,7 +704,17 @@ function handleSelectSample(sampleId: string): void {
     return;
   }
 
-  if (state.currentAudioId && state.currentAudioId !== sampleId) {
+  const shouldKeepAutoplayPlaybackState =
+    state.autoplayEnabled &&
+    state.currentAudioId !== null &&
+    state.currentAudioId !== sampleId &&
+    isBrowserAudioExtensionSupported(targetSample.extension);
+
+  if (
+    state.currentAudioId &&
+    state.currentAudioId !== sampleId &&
+    !shouldKeepAutoplayPlaybackState
+  ) {
     audioPreview.stop();
   }
 
@@ -716,6 +726,10 @@ function handleSelectSample(sampleId: string): void {
     nextPatch.activeSlotRangeStart = normalizeActiveSlotRangeStart(
       targetSample.slotNumber,
     );
+  }
+
+  if (shouldKeepAutoplayPlaybackState) {
+    nextPatch.currentAudioId = sampleId;
   }
 
   commitState(nextPatch);

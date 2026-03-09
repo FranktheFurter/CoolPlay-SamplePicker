@@ -77,16 +77,21 @@ export class AudioPreviewController {
     }
   }
 
-  private resetPlayback(): void {
+  private resetPlayback(notifyChange = true): void {
     this.audio.pause();
     this.audio.currentTime = 0;
     this.audio.loop = this.loopEnabled;
     this.audio.src = "";
     this.revokeObjectUrl();
 
-    if (this.currentSampleId !== null) {
+    if (this.currentSampleId !== null && notifyChange) {
       this.currentSampleId = null;
       this.onPlaybackChange(null);
+      return;
+    }
+
+    if (!notifyChange) {
+      this.currentSampleId = null;
     }
   }
 
@@ -106,7 +111,7 @@ export class AudioPreviewController {
     }
 
     const requestId = ++this.playbackRequestId;
-    this.resetPlayback();
+    this.resetPlayback(false);
 
     const file = await getFile();
 

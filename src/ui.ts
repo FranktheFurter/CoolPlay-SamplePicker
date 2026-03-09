@@ -94,6 +94,8 @@ const KEYBOARD_BUTTON_PRESS_ANIMATION_MS = 240;
 const SPACEBAR_PRESS_ANIMATION_BASE_MS = 300;
 const KEYBOARD_PRESS_DECAY_MS = 700;
 const BUTTON_PRESS_EASING = "cubic-bezier(0.22, 0.61, 0.36, 1)";
+const WAVEFORM_SWAP_ANIMATION_MS = 220;
+const WAVEFORM_SWAP_EASING = "cubic-bezier(0.22, 0.61, 0.36, 1)";
 const ROOT_DIRECTORY_LABEL = "Ordnerwurzel";
 const THEME_STORAGE_KEY = "sample-picker-theme";
 const THEME_OPTIONS = [
@@ -305,6 +307,14 @@ function formatDuration(durationSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = String(totalSeconds % 60).padStart(2, "0");
   return `${minutes}:${seconds}`;
+}
+
+function getWaveformSignature(waveform: WaveformPreview | null): string | null {
+  if (!waveform) {
+    return null;
+  }
+
+  return `${waveform.sampleId}:${waveform.durationSeconds}:${waveform.peaks.length}`;
 }
 
 function drawWaveform(
@@ -708,7 +718,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
                 <input type="checkbox" data-role="autoplay-toggle" />
                 Autoplay
               </label>
-              <span data-role="waveform-duration">Eintrag waehlen, um Waveform zu sehen</span>
+              <span class="waveform-duration" data-role="waveform-duration">--:--</span>
             </div>
           </div>
           <div class="waveform-canvas-wrap">
@@ -924,6 +934,9 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
 
   const waveformBaseCanvasElement = waveformBaseCanvas;
   const waveformPlayheadCanvasElement = waveformPlayheadCanvas;
+  const waveformPanelElement = waveformPanel;
+  const waveformTitleElement = waveformTitle;
+  const waveformDurationElement = waveformDuration;
   const resultsBodyElement = resultsBody;
   const slotCategoriesElement = slotCategories;
   const searchInputElement = searchInput;
@@ -936,9 +949,12 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   );
   const slotCategoryElements: SlotCategoryElements[] = [];
   let latestWaveform: WaveformPreview | null = null;
+  let displayedWaveform: WaveformPreview | null = null;
+  let displayedWaveformSignature: string | null = null;
   let latestSelectedSampleId: string | null = null;
   let latestCurrentAudioId: string | null = null;
   let playheadFrameId: number | null = null;
+  let waveformSwapAnimation: Animation | null = null;
   const virtualTopSpacer = document.createElement("div");
   virtualTopSpacer.className = "results-virtual-spacer";
   const virtualRows = document.createElement("div");
@@ -1439,7 +1455,10 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   function hasActivePlayheadTrack(): boolean {
     return (
       latestSelectedSampleId !== null &&
-      latestCurrentAudioId === latestSelectedSampleId
+      latestCurrentAudioId === latestSelectedSampleId &&
+      latestWaveform?.sampleId === latestSelectedSampleId &&
+      latestWaveform.peaks.length > 0 &&
+      displayedWaveform?.sampleId === latestSelectedSampleId
     );
   }
 
@@ -1615,8 +1634,75 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       input.checked = input.value === themeKey;
     }
 
-    drawWaveform(waveformBaseCanvasElement, latestWaveform);
+    drawWaveform(waveformBaseCanvasElement, displayedWaveform);
     drawPlayhead(waveformPlayheadCanvasElement, getPlayheadProgress());
+  }
+
+  function stopWaveformSwapAnimation(): void {
+    if (waveformSwapAnimation) {
+      waveformSwapAnimation.cancel();
+      waveformSwapAnimation = null;
+    }
+
+    waveformBaseCanvasElement.style.opacity = "1";
+    waveformBaseCanvasElement.style.transform = "translate3d(0, 0, 0)";
+  }
+
+  function animateWaveformSwap(): void {
+    stopWaveformSwapAnimation();
+
+    if (
+      typeof waveformBaseCanvasElement.animate !== "function" ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
+
+    waveformSwapAnimation = waveformBaseCanvasElement.animate(
+      [
+        {
+          opacity: 0.82,
+          transform: "translate3d(0, 1.5px, 0)",
+        },
+        {
+          opacity: 1,
+          transform: "translate3d(0, 0, 0)",
+        },
+      ],
+      {
+        duration: WAVEFORM_SWAP_ANIMATION_MS,
+        easing: WAVEFORM_SWAP_EASING,
+      },
+    );
+    waveformSwapAnimation.addEventListener("finish", () => {
+      if (waveformSwapAnimation) {
+        waveformSwapAnimation = null;
+      }
+
+      waveformBaseCanvasElement.style.opacity = "1";
+      waveformBaseCanvasElement.style.transform = "translate3d(0, 0, 0)";
+    });
+  }
+
+  function commitDisplayedWaveform(waveform: WaveformPreview | null): void {
+    const nextSignature = getWaveformSignature(waveform);
+
+    if (nextSignature === displayedWaveformSignature) {
+      displayedWaveform = waveform;
+      drawWaveform(waveformBaseCanvasElement, displayedWaveform);
+      return;
+    }
+
+    displayedWaveform = waveform;
+    displayedWaveformSignature = nextSignature;
+    drawWaveform(waveformBaseCanvasElement, displayedWaveform);
+
+    if (waveform) {
+      animateWaveformSwap();
+      return;
+    }
+
+    stopWaveformSwapAnimation();
   }
 
   for (const input of themeOptionInputs) {
@@ -1954,23 +2040,42 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
         errorElement.textContent = "";
       }
 
-      if (state.currentWaveform) {
-        waveformPanel.classList.add("is-active");
-        waveformTitle.textContent = state.currentWaveform.sampleName;
-        waveformDuration.textContent =
-          state.currentWaveform.peaks.length > 0
-            ? formatDuration(state.currentWaveform.durationSeconds)
-            : "Waveform wird geladen...";
+      const readyWaveform =
+        state.currentWaveform && state.currentWaveform.peaks.length > 0
+          ? state.currentWaveform
+          : null;
+
+      if (readyWaveform) {
+        commitDisplayedWaveform(readyWaveform);
+      } else if (!state.currentWaveform) {
+        commitDisplayedWaveform(null);
+      } else if (displayedWaveform === null) {
+        drawWaveform(waveformBaseCanvasElement, null);
+      }
+
+      const previewWaveform =
+        readyWaveform ??
+        displayedWaveform ??
+        (state.currentWaveform && state.currentWaveform.peaks.length === 0
+          ? state.currentWaveform
+          : null);
+
+      if (previewWaveform) {
+        waveformPanelElement.classList.add("is-active");
+        waveformTitleElement.textContent = previewWaveform.sampleName;
+        waveformDurationElement.textContent =
+          previewWaveform.peaks.length > 0
+            ? formatDuration(previewWaveform.durationSeconds)
+            : "--:--";
       } else {
-        waveformPanel.classList.remove("is-active");
-        waveformTitle.textContent = "Kein Sample aktiv";
-        waveformDuration.textContent = "Eintrag waehlen, um Waveform zu sehen";
+        waveformPanelElement.classList.remove("is-active");
+        waveformTitleElement.textContent = "Kein Sample aktiv";
+        waveformDurationElement.textContent = "--:--";
       }
 
       latestSelectedSampleId = state.selectedSampleId;
       latestCurrentAudioId = state.currentAudioId;
       latestWaveform = state.currentWaveform;
-      drawWaveform(waveformBaseCanvasElement, latestWaveform);
       syncPlayheadAnimation();
       renderSlotMatrix(state);
 
