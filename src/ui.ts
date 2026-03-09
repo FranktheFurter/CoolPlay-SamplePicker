@@ -1,5 +1,10 @@
 import { isBrowserAudioExtensionSupported } from "./audioSupport";
-import { fuzzyMatch, normalizeFuzzyQuery } from "./fuzzy";
+import {
+  fuzzyMatch,
+  mergeFuzzyRanges,
+  normalizeFuzzyQuery,
+  splitNormalizedFuzzyQuery,
+} from "./fuzzy";
 import type {
   AppState,
   RandomizerRequest,
@@ -73,6 +78,7 @@ const PATH_MATCH_CONTEXT_CHARACTERS = 24;
 const DEFAULT_RANDOMIZER_STEP_RATIO = 0.75;
 const BUTTON_PRESS_ANIMATION_MS = 130;
 const BUTTON_PRESS_EASING = "cubic-bezier(0.22, 0.61, 0.36, 1)";
+const ROOT_DIRECTORY_LABEL = "Ordnerwurzel";
 type ScrollAlignment = "start" | "center";
 
 function clampRandomizerRatio(value: number): number {
@@ -277,8 +283,9 @@ function createRow(
 
   const path = document.createElement("div");
   path.className = "sample-path";
-  path.title = sample.relativePath;
-  const pathPreview = formatPathPreview(sample.relativePath, normalizedQuery);
+  const directoryPath = getDirectoryPath(sample.relativePath);
+  path.title = directoryPath || ROOT_DIRECTORY_LABEL;
+  const pathPreview = formatPathPreview(directoryPath, normalizedQuery);
   applyFuzzyHighlight(path, pathPreview, normalizedQuery);
 
   const category = document.createElement("div");
@@ -331,9 +338,9 @@ function applyFuzzyHighlight(
     return;
   }
 
-  const match = fuzzyMatch(text, normalizedQuery);
+  const ranges = findHighlightRanges(text, normalizedQuery);
 
-  if (!match) {
+  if (ranges.length === 0) {
     element.textContent = text;
     return;
   }
@@ -341,7 +348,7 @@ function applyFuzzyHighlight(
   const fragment = document.createDocumentFragment();
   let textIndex = 0;
 
-  for (const range of match.ranges) {
+  for (const range of ranges) {
     if (range.start > textIndex) {
       fragment.append(document.createTextNode(text.slice(textIndex, range.start)));
     }
@@ -360,7 +367,39 @@ function applyFuzzyHighlight(
   element.replaceChildren(fragment);
 }
 
+function getDirectoryPath(relativePath: string): string {
+  const normalizedPath = relativePath.replace(/\\/g, "/");
+  const lastSeparatorIndex = normalizedPath.lastIndexOf("/");
+
+  if (lastSeparatorIndex <= 0) {
+    return "";
+  }
+
+  return normalizedPath.slice(0, lastSeparatorIndex);
+}
+
+function findHighlightRanges(
+  text: string,
+  normalizedQuery: string,
+): Array<{
+  start: number;
+  end: number;
+}> {
+  const queryTokens = splitNormalizedFuzzyQuery(normalizedQuery);
+
+  if (queryTokens.length === 0) {
+    return [];
+  }
+
+  const ranges = queryTokens.flatMap((token) => fuzzyMatch(text, token)?.ranges ?? []);
+  return mergeFuzzyRanges(ranges);
+}
+
 function buildDefaultPathPreview(normalizedPath: string): string {
+  if (!normalizedPath) {
+    return ROOT_DIRECTORY_LABEL;
+  }
+
   const segments = normalizedPath
     .split("/")
     .map((segment) => segment.trim())
@@ -384,13 +423,13 @@ function formatPathPreview(relativePath: string, normalizedQuery: string): strin
     return buildDefaultPathPreview(normalizedPath);
   }
 
-  const match = fuzzyMatch(normalizedPath, normalizedQuery);
+  const ranges = findHighlightRanges(normalizedPath, normalizedQuery);
 
-  if (!match || match.ranges.length === 0) {
+  if (ranges.length === 0) {
     return buildDefaultPathPreview(normalizedPath);
   }
 
-  const firstMatch = match.ranges[0];
+  const firstMatch = ranges[0];
   const previewStart = Math.max(
     0,
     firstMatch.start - PATH_MATCH_CONTEXT_CHARACTERS,
