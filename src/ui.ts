@@ -55,7 +55,16 @@ interface SlotCategoryElements {
   definition: SlotCategoryDefinition;
   input: HTMLInputElement;
   size: HTMLSpanElement;
+  count: HTMLSpanElement;
   cells: HTMLDivElement[];
+}
+
+interface ThemeOption {
+  key: string;
+  label: string;
+  accent: string;
+  accentStrong: string;
+  contrast: string;
 }
 
 const SLOT_CATEGORY_DEFINITIONS: SlotCategoryDefinition[] = [
@@ -78,7 +87,118 @@ const PATH_MATCH_CONTEXT_CHARACTERS = 24;
 const BUTTON_PRESS_ANIMATION_MS = 130;
 const BUTTON_PRESS_EASING = "cubic-bezier(0.22, 0.61, 0.36, 1)";
 const ROOT_DIRECTORY_LABEL = "Ordnerwurzel";
+const THEME_STORAGE_KEY = "sample-picker-theme";
+const THEME_OPTIONS = [
+  {
+    key: "lime",
+    label: "Lime",
+    accent: "#a9dc76",
+    accentStrong: "#c9f2a0",
+    contrast: "#fc9867",
+  },
+  {
+    key: "yellow",
+    label: "Gelb",
+    accent: "#ffd866",
+    accentStrong: "#ffe69c",
+    contrast: "#ab9df2",
+  },
+  {
+    key: "orange",
+    label: "Orange",
+    accent: "#fc9867",
+    accentStrong: "#ffb38d",
+    contrast: "#78dce8",
+  },
+  {
+    key: "violet",
+    label: "Violett",
+    accent: "#ab9df2",
+    accentStrong: "#d0c8ff",
+    contrast: "#a9dc76",
+  },
+  {
+    key: "cyan",
+    label: "Cyan",
+    accent: "#78dce8",
+    accentStrong: "#a9eef6",
+    contrast: "#ffd866",
+  },
+] as const satisfies readonly ThemeOption[];
+type ThemeKey = (typeof THEME_OPTIONS)[number]["key"];
+const DEFAULT_THEME_KEY: ThemeKey = "orange";
 type ScrollAlignment = "start" | "center";
+
+function isThemeKey(value: string | null): value is ThemeKey {
+  return THEME_OPTIONS.some((option) => option.key === value);
+}
+
+function applyTheme(themeKey: ThemeKey): void {
+  document.documentElement.dataset.theme = themeKey;
+}
+
+function readStoredTheme(): ThemeKey {
+  try {
+    const value = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return isThemeKey(value) ? value : DEFAULT_THEME_KEY;
+  } catch {
+    return DEFAULT_THEME_KEY;
+  }
+}
+
+function persistTheme(themeKey: ThemeKey): void {
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, themeKey);
+  } catch {
+    // Ignore storage failures such as private mode restrictions.
+  }
+}
+
+function getThemeOption(themeKey: ThemeKey): ThemeOption {
+  return (
+    THEME_OPTIONS.find((option) => option.key === themeKey) ??
+    THEME_OPTIONS.find((option) => option.key === DEFAULT_THEME_KEY) ??
+    THEME_OPTIONS[0]
+  );
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const normalized = hex.replace("#", "");
+  const expanded =
+    normalized.length === 3
+      ? normalized
+          .split("")
+          .map((character) => `${character}${character}`)
+          .join("")
+      : normalized;
+  const red = Number.parseInt(expanded.slice(0, 2), 16);
+  const green = Number.parseInt(expanded.slice(2, 4), 16);
+  const blue = Number.parseInt(expanded.slice(4, 6), 16);
+
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function getWaveformPalette(): {
+  centerLine: string;
+  placeholder: string;
+  bar: string;
+  playhead: string;
+  playheadGlow: string;
+} {
+  const datasetTheme = document.documentElement.dataset.theme ?? null;
+  const activeThemeKey = isThemeKey(datasetTheme)
+    ? datasetTheme
+    : DEFAULT_THEME_KEY;
+  const theme = getThemeOption(activeThemeKey);
+
+  return {
+    centerLine: hexToRgba(theme.accent, 0.28),
+    placeholder: hexToRgba(theme.contrast, 0.42),
+    bar: hexToRgba(theme.contrast, 0.94),
+    playhead: hexToRgba(theme.accentStrong, 0.96),
+    playheadGlow: hexToRgba(theme.accentStrong, 0.34),
+  };
+}
 
 function getSlotCategoryRangeStart(slotNumber: number): number {
   for (const definition of SLOT_CATEGORY_DEFINITIONS) {
@@ -204,7 +324,8 @@ function drawWaveform(
   context.clearRect(0, 0, width, height);
 
   const centerY = height / 2;
-  context.strokeStyle = "rgba(112, 84, 93, 0.34)";
+  const palette = getWaveformPalette();
+  context.strokeStyle = palette.centerLine;
   context.lineWidth = 1;
   context.beginPath();
   context.moveTo(0, centerY);
@@ -212,7 +333,7 @@ function drawWaveform(
   context.stroke();
 
   if (!waveform || waveform.peaks.length === 0) {
-    context.fillStyle = "rgba(112, 84, 93, 0.46)";
+    context.fillStyle = palette.placeholder;
     context.fillRect(Math.max(0, width / 2 - 2), centerY - 18, 4, 36);
     return;
   }
@@ -223,7 +344,7 @@ function drawWaveform(
   const step = barWidth + gap;
   const barCount = Math.max(1, Math.floor(width / step));
 
-  context.fillStyle = "rgba(110, 16, 47, 0.88)";
+  context.fillStyle = palette.bar;
 
   for (let i = 0; i < barCount; i += 1) {
     const x = i * step;
@@ -266,12 +387,16 @@ function drawPlayhead(
 
   const clamped = Math.max(0, Math.min(1, playheadProgress));
   const x = Math.round(clamped * (width - 1)) + 0.5;
-  context.strokeStyle = "rgba(47, 154, 131, 0.95)";
+  const palette = getWaveformPalette();
+  context.strokeStyle = palette.playhead;
   context.lineWidth = 2;
+  context.shadowBlur = 14;
+  context.shadowColor = palette.playheadGlow;
   context.beginPath();
   context.moveTo(x, 2);
   context.lineTo(x, height - 2);
   context.stroke();
+  context.shadowBlur = 0;
 }
 
 function createRow(
@@ -459,19 +584,55 @@ function formatPathPreview(relativePath: string, normalizedQuery: string): strin
 }
 
 export function createUI(root: HTMLElement, handlers: UIHandlers): UIController {
+  const initialTheme = readStoredTheme();
+  applyTheme(initialTheme);
+  const themePickerMarkup = THEME_OPTIONS.map(
+    (option) => `
+      <label
+        class="theme-picker-option"
+        style="--theme-swatch: ${option.accent}"
+        title="${option.label}"
+      >
+        <input
+          type="radio"
+          name="theme-accent"
+          value="${option.key}"
+          data-role="theme-option"
+          aria-label="${option.label}"
+          ${option.key === initialTheme ? "checked" : ""}
+        />
+        <span class="theme-picker-swatch" aria-hidden="true"></span>
+      </label>
+    `,
+  ).join("");
+
   root.innerHTML = `
     <main class="app-shell">
       <section class="main-column">
         <section class="topbar">
           <div class="headline">
-            <h1>Sample Picker</h1>
-            <button
-              type="button"
-              class="secondary-button headline-export-button"
-              data-role="export-assignments"
-            >
-              Export
-            </button>
+            <div class="headline-brand">
+              <fieldset class="theme-picker" aria-label="Akzentfarbe">
+                ${themePickerMarkup}
+              </fieldset>
+              <h1>CoolPlay SamplePicker</h1>
+            </div>
+            <div class="headline-actions">
+              <button
+                type="button"
+                class="danger-button headline-reset-button"
+                data-role="reset-assignments"
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                class="secondary-button headline-export-button"
+                data-role="export-assignments"
+              >
+                Export
+              </button>
+            </div>
           </div>
           <div class="panel">
             <div class="controls">
@@ -535,6 +696,10 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
                 <input type="checkbox" data-role="loop-toggle" />
                 Loop
               </label>
+              <label class="loop-toggle">
+                <input type="checkbox" data-role="autoplay-toggle" />
+                Autoplay
+              </label>
               <span data-role="waveform-duration">Eintrag waehlen, um Waveform zu sehen</span>
             </div>
           </div>
@@ -552,90 +717,55 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
 
         <section class="results">
           <div class="results-toolbar">
-            <div class="results-toolbar-main-actions">
-              <button
-                type="button"
-                class="toolbar-main-button"
-                data-role="random-sample"
-                title="Zufaelliges Sample aus aktueller Trefferliste auswaehlen (A)"
-              >
-                <span class="toolbar-main-button-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" focusable="false">
-                    <path
-                      d="M4 7h3l2.6 3.2M4 17h3l2.6-3.2M14.5 7H20m0 0-2.2-2.2M20 7l-2.2 2.2M14.5 17H20m0 0-2.2-2.2M20 17l-2.2 2.2"
-                    />
-                  </svg>
-                </span>
-                <span>Random Pick</span>
-              </button>
-              <div class="toolbar-nav-stack">
+            <div class="results-toolbar-main-actions keyboard-toolbar">
+              <div class="keyboard-cluster">
                 <button
                   type="button"
-                  class="toolbar-main-button is-nav"
-                  data-role="previous-selected"
-                  title="Vorherigen Eintrag auswaehlen (W)"
-                >
-                  <span class="toolbar-main-button-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false">
-                      <path d="M12 5v14M6.5 10.5 12 5l5.5 5.5" />
-                    </svg>
-                  </span>
-                  <span>Previous</span>
-                </button>
-                <button
-                  type="button"
-                  class="toolbar-main-button is-play-main"
+                  class="toolbar-main-button toolbar-spacebar is-play-main"
                   data-role="play-selected"
-                  title="Wiedergabe des ausgewaehlten Samples starten oder stoppen (S)"
+                  title="Wiedergabe des ausgewaehlten Samples starten oder stoppen (Leertaste)"
                 >
-                  <span class="toolbar-main-button-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false">
-                      <path class="is-solid" d="M8 6v12l10-6z" />
-                    </svg>
-                  </span>
-                  <span class="toolbar-main-button-label">Play</span>
+                  <span class="toolbar-spacebar-main toolbar-main-button-label">Play</span>
+                  <span class="toolbar-spacebar-key">Space</span>
                 </button>
                 <button
                   type="button"
-                  class="toolbar-main-button is-nav"
-                  data-role="next-selected"
-                  title="Naechsten Eintrag auswaehlen (X)"
+                  class="toolbar-main-button toolbar-key is-random-key"
+                  data-role="random-sample"
+                  title="Zufaelliges Sample aus aktueller Trefferliste auswaehlen (Pfeil links)"
                 >
-                  <span class="toolbar-main-button-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false">
-                      <path d="M12 19V5m5.5 8.5L12 19l-5.5-5.5" />
-                    </svg>
-                  </span>
-                  <span>Next</span>
+                  <span class="toolbar-key-arrow" aria-hidden="true">←</span>
+                  <span class="toolbar-key-label">Random</span>
+                </button>
+                <button
+                  type="button"
+                  class="toolbar-main-button toolbar-key is-nav is-nav-up"
+                  data-role="previous-selected"
+                  title="Vorherigen Eintrag auswaehlen (Pfeil hoch)"
+                >
+                  <span class="toolbar-key-arrow" aria-hidden="true">↑</span>
+                  <span class="toolbar-key-label">Prev</span>
+                </button>
+                <button
+                  type="button"
+                  class="toolbar-main-button toolbar-key is-nav is-nav-down"
+                  data-role="next-selected"
+                  title="Naechsten Eintrag auswaehlen (Pfeil runter)"
+                >
+                  <span class="toolbar-key-arrow" aria-hidden="true">↓</span>
+                  <span class="toolbar-key-label">Next</span>
+                </button>
+                <button
+                  type="button"
+                  class="toolbar-main-button toolbar-key is-write-key is-write"
+                  data-role="write-selected"
+                  title="Ausgewaehltes Sample auf den naechsten freien Slot im aktiven Segment schreiben (Pfeil rechts)"
+                >
+                  <span class="toolbar-key-arrow" aria-hidden="true">→</span>
+                  <span class="toolbar-key-label toolbar-main-button-label">Write</span>
                 </button>
               </div>
-                <button
-                  type="button"
-                  class="toolbar-main-button is-write"
-                  data-role="write-selected"
-                  title="Ausgewaehltes Sample auf den naechsten freien Slot im aktiven Segment schreiben (D)"
-                >
-                  <span class="toolbar-main-button-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false">
-                      <path
-                        d="M6 5h9l3 3v11H6zM15 5v4h4M9 14h6M9 17h6M9 11h3"
-                      />
-                    </svg>
-                  </span>
-                  <span class="toolbar-main-button-label">Write</span>
-                </button>
-              <label class="toolbar-toggle">
-                <input type="checkbox" data-role="autoplay-toggle" />
-                <span>Autoplay</span>
-              </label>
             </div>
-            <button
-              type="button"
-              class="danger-button"
-              data-role="reset-assignments"
-            >
-              Alle Zuweisungen zuruecksetzen
-            </button>
           </div>
           <div class="results-header">
             <div>Name</div>
@@ -649,13 +779,6 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       <aside class="slot-panel">
         <div class="slot-panel-layout">
           <div class="slot-categories" data-role="slot-categories"></div>
-          <div class="slot-counter-rail" data-role="slot-counter-rail">
-            <div
-              class="slot-counter-display"
-              data-role="slot-counter"
-              aria-label="Belegte Slots im aktiven Segment"
-            ></div>
-          </div>
         </div>
       </aside>
     </main>
@@ -743,12 +866,6 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   const resultsBody = root.querySelector<HTMLDivElement>(
     '[data-role="results-body"]',
   );
-  const slotCounterDisplay = root.querySelector<HTMLDivElement>(
-    '[data-role="slot-counter"]',
-  );
-  const slotCounterRail = root.querySelector<HTMLDivElement>(
-    '[data-role="slot-counter-rail"]',
-  );
   const slotCategories = root.querySelector<HTMLDivElement>(
     '[data-role="slot-categories"]',
   );
@@ -790,8 +907,6 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     !waveformBaseCanvas ||
     !waveformPlayheadCanvas ||
     !resultsBody ||
-    !slotCounterDisplay ||
-    !slotCounterRail ||
     !slotCategories ||
     !playSelectedButtonLabel ||
     !writeSelectedButtonLabel
@@ -803,13 +918,14 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   const waveformPlayheadCanvasElement = waveformPlayheadCanvas;
   const resultsBodyElement = resultsBody;
   const slotCategoriesElement = slotCategories;
-  const slotCounterRailElement = slotCounterRail;
-  const slotCounterDisplayElement = slotCounterDisplay;
   const searchInputElement = searchInput;
   const assignedOnlyInputElement = assignedOnlyInput;
   const playSelectedButtonLabelElement = playSelectedButtonLabel;
   const writeSelectedButtonLabelElement = writeSelectedButtonLabel;
   const exportAssignmentsButtonElement = exportAssignmentsButton;
+  const themeOptionInputs = Array.from(
+    root.querySelectorAll<HTMLInputElement>('[data-role="theme-option"]'),
+  );
   const slotCategoryElements: SlotCategoryElements[] = [];
   let latestWaveform: WaveformPreview | null = null;
   let latestSelectedSampleId: string | null = null;
@@ -1193,6 +1309,14 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       rangeElement.className = "slot-category-range";
       rangeElement.textContent = `${definition.start} - ${definition.end}`;
 
+      const countElement = document.createElement("span");
+      countElement.className = "slot-category-count";
+      countElement.textContent = "";
+
+      const metaFooterElement = document.createElement("div");
+      metaFooterElement.className = "slot-category-meta-footer";
+      metaFooterElement.append(rangeElement, countElement);
+
       const sizeElement = document.createElement("span");
       sizeElement.className = "slot-category-size";
       sizeElement.textContent = "0 MB";
@@ -1224,7 +1348,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
         pixelsElement.append(pixelElement);
       }
 
-      metaElement.append(inputElement, rangeElement, sizeElement);
+      metaElement.append(inputElement, metaFooterElement, sizeElement);
       categoryElement.append(metaElement, pixelsElement);
       categoryElement.addEventListener("click", (event) => {
         const target = event.target as HTMLElement;
@@ -1245,6 +1369,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
         definition,
         input: inputElement,
         size: sizeElement,
+        count: countElement,
         cells,
       });
     }
@@ -1268,69 +1393,57 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     }
 
     for (const category of slotCategoryElements) {
+      const isActive = category.definition.start === state.activeSlotRangeStart;
+
       category.element.classList.toggle(
         "is-active",
-        category.definition.start === state.activeSlotRangeStart,
+        isActive,
       );
       category.size.textContent = formatMegabytes(
         assignedBytesByCategoryStart.get(category.definition.start) ?? 0,
       );
+      category.count.textContent = isActive
+        ? String(state.activeSlotAssignedCount)
+        : "";
 
       for (const cell of category.cells) {
         const slotNumber = Number.parseInt(cell.dataset.slotNumber ?? "", 10);
 
         if (!Number.isInteger(slotNumber)) {
-          cell.classList.remove("is-assigned", "is-counter");
+          cell.classList.remove("is-assigned");
           continue;
         }
 
         cell.classList.toggle("is-assigned", assignedSlots.has(slotNumber));
-        cell.classList.toggle(
-          "is-counter",
-          state.slotCounter !== null && state.slotCounter === slotNumber,
-        );
       }
     }
   }
 
-  function syncSlotCounterPosition(): void {
-    const railRect = slotCounterRailElement.getBoundingClientRect();
-    const displayHeight = slotCounterDisplayElement.offsetHeight;
+  createSlotCategoryElements();
 
-    if (displayHeight <= 0 || railRect.height <= 0) {
-      slotCounterDisplayElement.style.setProperty("--slot-counter-offset", "0px");
-      return;
+  function setTheme(themeKey: ThemeKey): void {
+    applyTheme(themeKey);
+    persistTheme(themeKey);
+
+    for (const input of themeOptionInputs) {
+      input.checked = input.value === themeKey;
     }
 
-    const activePixel = slotCategoriesElement.querySelector<HTMLElement>(
-      ".slot-pixel.is-counter",
-    );
-    const fallbackCategory = slotCategoriesElement.querySelector<HTMLElement>(
-      ".slot-category.is-active",
-    );
-    const defaultCategory = slotCategoriesElement.querySelector<HTMLElement>(
-      ".slot-category",
-    );
-    const targetElement = activePixel ?? fallbackCategory ?? defaultCategory;
-
-    if (!targetElement) {
-      slotCounterDisplayElement.style.setProperty("--slot-counter-offset", "0px");
-      return;
-    }
-
-    const targetRect = targetElement.getBoundingClientRect();
-    const unclampedOffset =
-      targetRect.top - railRect.top + targetRect.height / 2 - displayHeight / 2;
-    const maxOffset = Math.max(0, railRect.height - displayHeight);
-    const clampedOffset = Math.max(0, Math.min(maxOffset, unclampedOffset));
-
-    slotCounterDisplayElement.style.setProperty(
-      "--slot-counter-offset",
-      `${Math.round(clampedOffset)}px`,
-    );
+    drawWaveform(waveformBaseCanvasElement, latestWaveform);
+    drawPlayhead(waveformPlayheadCanvasElement, getPlayheadProgress());
   }
 
-  createSlotCategoryElements();
+  for (const input of themeOptionInputs) {
+    input.addEventListener("change", (event) => {
+      const target = event.currentTarget as HTMLInputElement;
+
+      if (!target.checked || !isThemeKey(target.value)) {
+        return;
+      }
+
+      setTheme(target.value);
+    });
+  }
 
   pickDirectoryButton.addEventListener("click", () => {
     animateButtonPress(pickDirectoryButton);
@@ -1418,18 +1531,17 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       return;
     }
 
-    const key = event.key.toLowerCase();
     let handled = false;
 
-    if (key === "a") {
+    if (event.key === "ArrowLeft") {
       handled = triggerToolbarButton(randomSampleButton);
-    } else if (key === "w") {
+    } else if (event.key === "ArrowUp") {
       handled = triggerToolbarButton(previousSelectedButton);
-    } else if (key === "s") {
+    } else if (event.code === "Space" || event.key === " ") {
       handled = triggerToolbarButton(playSelectedButton);
-    } else if (key === "x") {
+    } else if (event.key === "ArrowDown") {
       handled = triggerToolbarButton(nextSelectedButton);
-    } else if (key === "d") {
+    } else if (event.key === "ArrowRight") {
       handled = triggerToolbarButton(writeSelectedButton);
     }
 
@@ -1448,8 +1560,6 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
 
   if (typeof ResizeObserver !== "undefined") {
     const resizeObserver = new ResizeObserver(() => {
-      syncSlotCounterPosition();
-
       if (!virtualListMounted || virtualSamples.length === 0) {
         return;
       }
@@ -1548,18 +1658,18 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
         ? "Stop"
         : "Play";
       playSelectedButton.title = selectedSampleIsPlaying
-        ? "Wiedergabe des ausgewaehlten Samples stoppen (S)"
-        : "Wiedergabe des ausgewaehlten Samples starten oder stoppen (S)";
+        ? "Wiedergabe des ausgewaehlten Samples stoppen (Leertaste)"
+        : "Wiedergabe des ausgewaehlten Samples starten oder stoppen (Leertaste)";
       writeSelectedButton.disabled = !canUseSelectedSampleActions;
       writeSelectedButton.dataset.mode = removeSelectedAssignment ? "remove" : "write";
       writeSelectedButton.classList.toggle("is-write", !removeSelectedAssignment);
       writeSelectedButton.classList.toggle("is-remove", removeSelectedAssignment);
       writeSelectedButtonLabelElement.textContent = removeSelectedAssignment
-        ? "Remove"
+        ? "Delete"
         : "Write";
       writeSelectedButton.title = removeSelectedAssignment
-        ? "Zuweisung des ausgewaehlten Samples entfernen und Segment lueckenlos nachruecken."
-        : "Ausgewaehltes Sample auf den naechsten freien Slot im aktiven Segment schreiben.";
+        ? "Zuweisung des ausgewaehlten Samples entfernen und Segment lueckenlos nachruecken (Pfeil rechts)."
+        : "Ausgewaehltes Sample auf den naechsten freien Slot im aktiven Segment schreiben (Pfeil rechts).";
 
       const assignedOnlyModeActive = state.showAssignedOnly;
       const effectiveNormalizedQuery = assignedOnlyModeActive
@@ -1584,7 +1694,6 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
           0,
         ),
       )}`;
-      slotCounterDisplayElement.textContent = String(state.activeSlotAssignedCount);
       loopToggleInput.checked = state.loopEnabled;
       autoplayToggleInput.checked = state.autoplayEnabled;
 
@@ -1678,7 +1787,6 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       drawWaveform(waveformBaseCanvasElement, latestWaveform);
       syncPlayheadAnimation();
       renderSlotMatrix(state);
-      syncSlotCounterPosition();
 
       if (state.filteredSamples.length === 0) {
         pendingCategoryFirstResultScroll = false;

@@ -236,7 +236,6 @@ function deriveState(nextState: AppState): AppState {
     ...nextState,
     filteredSamples,
     selectedSampleId,
-    slotCounter: activeSlotMetrics.nextFreeSlot,
     activeSlotAssignedCount: activeSlotMetrics.assignedCount,
     activeSlotRangeStart,
   };

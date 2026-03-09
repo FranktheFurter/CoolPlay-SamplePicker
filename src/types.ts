@@ -38,7 +38,6 @@ export interface AppState {
   samples: SampleRecord[];
   filteredSamples: SampleRecord[];
   selectedSampleId: string | null;
-  slotCounter: number | null;
   activeSlotAssignedCount: number;
   activeSlotRangeStart: number;
   loopEnabled: boolean;
