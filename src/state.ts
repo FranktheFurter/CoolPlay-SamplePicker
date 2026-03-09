@@ -15,6 +15,7 @@ export const initialAppState: AppState = {
   currentDirectoryId: null,
   currentDirectoryName: null,
   isScanning: false,
+  scanProgress: null,
   currentAudioId: null,
   currentWaveform: null,
   lastScanAt: null,

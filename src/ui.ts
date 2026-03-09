@@ -3,6 +3,7 @@ import { fuzzyMatch, normalizeFuzzyQuery } from "./fuzzy";
 import type {
   AppState,
   RandomizerRequest,
+  ScanProgress,
   SampleRecord,
   WaveformPreview,
 } from "./types";
@@ -83,12 +84,63 @@ function clampRandomizerRatio(value: number): number {
 }
 
 function formatCount(count: number): string {
-  return `${count} Sample${count === 1 ? "" : "s"}`;
+  const formattedCount = count.toLocaleString("de-DE");
+  return `${formattedCount} Sample${count === 1 ? "" : "s"}`;
+}
+
+function formatProgressCount(current: number, total: number | null): string {
+  const formattedCurrent = current.toLocaleString("de-DE");
+
+  if (total === null) {
+    return `${formattedCurrent} gefunden`;
+  }
+
+  return `${formattedCurrent} / ${total.toLocaleString("de-DE")}`;
+}
+
+function formatEta(estimatedRemainingMs: number | null): string {
+  if (estimatedRemainingMs === null) {
+    return "ETA wird berechnet";
+  }
+
+  if (estimatedRemainingMs <= 0) {
+    return "Fast fertig";
+  }
+
+  const totalSeconds = Math.max(1, Math.round(estimatedRemainingMs / 1000));
+
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s Rest`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, "0");
+  return `${minutes}:${seconds} Rest`;
+}
+
+function formatScanPhase(progress: ScanProgress): string {
+  return progress.phase === "counting"
+    ? "Sample-Library wird gezaehlt"
+    : "Sample-Library wird gescannt";
+}
+
+function formatScanDetail(progress: ScanProgress): string {
+  if (progress.phase === "counting") {
+    return `${formatProgressCount(progress.discoveredSampleCount, null)} unterstuetzte Samples entdeckt`;
+  }
+
+  return `${formatProgressCount(progress.scannedSampleCount, progress.totalSampleCount)} Samples verarbeitet`;
 }
 
 function formatStatus(state: AppState): string {
   if (state.isScanning) {
-    return "Scan laeuft...";
+    const directoryLabel = state.currentDirectoryName ?? "Ordner";
+
+    if (!state.scanProgress) {
+      return `Ordner: ${directoryLabel} · Scan laeuft...`;
+    }
+
+    return `Ordner: ${directoryLabel} · ${formatScanPhase(state.scanProgress)}`;
   }
 
   if (!state.currentDirectoryName) {
@@ -438,6 +490,28 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
           <div data-role="count"></div>
         </div>
 
+        <section class="scan-progress" data-role="scan-progress" hidden>
+          <div class="scan-progress-head">
+            <strong data-role="scan-progress-label"></strong>
+            <span data-role="scan-progress-meta"></span>
+          </div>
+          <div
+            class="scan-progress-track"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+            aria-label="Scan-Fortschritt"
+            data-role="scan-progress-track"
+          >
+            <div class="scan-progress-fill" data-role="scan-progress-fill"></div>
+          </div>
+          <div class="scan-progress-detail">
+            <span data-role="scan-progress-detail"></span>
+            <span data-role="scan-progress-path"></span>
+          </div>
+        </section>
+
         <div class="error-box" data-role="error" hidden></div>
 
         <section class="waveform-panel" data-role="waveform-panel">
@@ -624,6 +698,27 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   );
   const statusElement = root.querySelector<HTMLDivElement>('[data-role="status"]');
   const countElement = root.querySelector<HTMLDivElement>('[data-role="count"]');
+  const scanProgressElement = root.querySelector<HTMLElement>(
+    '[data-role="scan-progress"]',
+  );
+  const scanProgressLabelElement = root.querySelector<HTMLElement>(
+    '[data-role="scan-progress-label"]',
+  );
+  const scanProgressMetaElement = root.querySelector<HTMLElement>(
+    '[data-role="scan-progress-meta"]',
+  );
+  const scanProgressTrackElement = root.querySelector<HTMLElement>(
+    '[data-role="scan-progress-track"]',
+  );
+  const scanProgressFillElement = root.querySelector<HTMLElement>(
+    '[data-role="scan-progress-fill"]',
+  );
+  const scanProgressDetailElement = root.querySelector<HTMLElement>(
+    '[data-role="scan-progress-detail"]',
+  );
+  const scanProgressPathElement = root.querySelector<HTMLElement>(
+    '[data-role="scan-progress-path"]',
+  );
   const errorElement = root.querySelector<HTMLDivElement>('[data-role="error"]');
   const waveformPanel = root.querySelector<HTMLElement>(
     '[data-role="waveform-panel"]',
@@ -674,6 +769,13 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     !assignedOnlyInput ||
     !statusElement ||
     !countElement ||
+    !scanProgressElement ||
+    !scanProgressLabelElement ||
+    !scanProgressMetaElement ||
+    !scanProgressTrackElement ||
+    !scanProgressFillElement ||
+    !scanProgressDetailElement ||
+    !scanProgressPathElement ||
     !errorElement ||
     !waveformPanel ||
     !waveformTitle ||
@@ -1503,7 +1605,67 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       autoplayToggleInput.checked = state.autoplayEnabled;
 
       statusElement.textContent = formatStatus(state);
-      countElement.textContent = formatCount(state.filteredSamples.length);
+      countElement.textContent =
+        state.isScanning && state.scanProgress
+          ? state.scanProgress.phase === "counting"
+            ? `${state.scanProgress.discoveredSampleCount.toLocaleString(
+                "de-DE",
+              )} Samples gefunden`
+            : `${formatProgressCount(
+                state.scanProgress.scannedSampleCount,
+                state.scanProgress.totalSampleCount,
+              )} Samples`
+          : formatCount(state.filteredSamples.length);
+
+      if (state.isScanning && state.scanProgress) {
+        const { scanProgress } = state;
+        const progressPercent =
+          scanProgress.phase === "scanning" &&
+          scanProgress.totalSampleCount !== null &&
+          scanProgress.totalSampleCount > 0
+            ? Math.max(
+                0,
+                Math.min(
+                  100,
+                  (scanProgress.scannedSampleCount / scanProgress.totalSampleCount) *
+                    100,
+                ),
+              )
+            : 0;
+
+        scanProgressElement.hidden = false;
+        scanProgressLabelElement.textContent = formatScanPhase(scanProgress);
+        scanProgressMetaElement.textContent =
+          scanProgress.phase === "counting"
+            ? formatProgressCount(scanProgress.discoveredSampleCount, null)
+            : `${formatProgressCount(
+                scanProgress.scannedSampleCount,
+                scanProgress.totalSampleCount,
+              )} · ${formatEta(scanProgress.estimatedRemainingMs)}`;
+        scanProgressDetailElement.textContent = formatScanDetail(scanProgress);
+        scanProgressPathElement.textContent = scanProgress.currentPath
+          ? buildDefaultPathPreview(scanProgress.currentPath)
+          : "";
+        scanProgressTrackElement.classList.toggle(
+          "is-indeterminate",
+          scanProgress.phase === "counting",
+        );
+        scanProgressTrackElement.setAttribute(
+          "aria-valuenow",
+          String(Math.round(progressPercent)),
+        );
+        scanProgressFillElement.style.width =
+          scanProgress.phase === "counting" ? "36%" : `${progressPercent}%`;
+      } else {
+        scanProgressElement.hidden = true;
+        scanProgressLabelElement.textContent = "";
+        scanProgressMetaElement.textContent = "";
+        scanProgressDetailElement.textContent = "";
+        scanProgressPathElement.textContent = "";
+        scanProgressTrackElement.classList.remove("is-indeterminate");
+        scanProgressTrackElement.setAttribute("aria-valuenow", "0");
+        scanProgressFillElement.style.width = "0%";
+      }
 
       if (state.error) {
         errorElement.hidden = false;

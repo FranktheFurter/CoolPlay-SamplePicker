@@ -292,6 +292,104 @@ input[type="search"] {
   letter-spacing: 0.03em;
 }
 
+.scan-progress {
+  margin-bottom: 10px;
+  border: 2px solid rgba(62, 51, 86, 0.8);
+  border-radius: 8px;
+  padding: 9px 10px 10px;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(28, 22, 42, 0.92) 0%,
+      rgba(18, 22, 34, 0.96) 100%
+    );
+}
+
+.scan-progress-head,
+.scan-progress-detail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scan-progress-head {
+  margin-bottom: 7px;
+  font-family: var(--font-tracker);
+  letter-spacing: 0.03em;
+}
+
+.scan-progress-head strong {
+  color: var(--text);
+  font-size: 1.2rem;
+}
+
+.scan-progress-head span,
+.scan-progress-detail {
+  color: var(--muted);
+  font-size: 1.02rem;
+}
+
+.scan-progress-track {
+  position: relative;
+  height: 14px;
+  border: 2px solid rgba(62, 51, 86, 0.8);
+  border-radius: 999px;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.03) 0 8px,
+      rgba(0, 0, 0, 0.18) 8px 16px
+    ),
+    rgba(10, 9, 18, 0.92);
+  overflow: hidden;
+}
+
+.scan-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(201, 68, 112, 0.96) 0%,
+      rgba(240, 98, 144, 0.94) 58%,
+      rgba(255, 166, 204, 0.96) 100%
+    );
+  box-shadow: 0 0 18px rgba(240, 98, 144, 0.3);
+  transition: width 120ms linear;
+}
+
+.scan-progress-track.is-indeterminate .scan-progress-fill {
+  position: relative;
+  min-width: 24%;
+  animation: scan-progress-indeterminate 1.25s linear infinite;
+}
+
+.scan-progress-detail {
+  margin-top: 7px;
+  font-family: var(--font-tracker);
+  letter-spacing: 0.02em;
+}
+
+.scan-progress-path {
+  max-width: 52%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+@keyframes scan-progress-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(320%);
+  }
+}
+
 .error-box {
   margin-bottom: 16px;
   border: 1px solid rgba(224, 80, 96, 0.35);

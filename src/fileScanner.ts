@@ -1,4 +1,4 @@
-import type { CategoryGuess, SampleRecord } from "./types";
+import type { CategoryGuess, SampleRecord, ScanProgress } from "./types";
 import { isSupportedSampleExtension } from "./sampleFormats";
 
 const CATEGORY_RULES: Array<{
@@ -16,6 +16,8 @@ const CATEGORY_RULES: Array<{
 ];
 
 const MACOS_METADATA_DIRECTORIES = new Set(["__macosx"]);
+const SCAN_PROGRESS_REPORT_INTERVAL_MS = 100;
+const SCAN_PROGRESS_YIELD_INTERVAL_MS = 32;
 
 function shouldSkipEntry(
   entryName: string,
@@ -79,13 +81,64 @@ export function isFileSystemAccessSupported(): boolean {
   return typeof window !== "undefined" && "showDirectoryPicker" in window;
 }
 
+async function yieldToUiThread(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    window.setTimeout(resolve, 0);
+  });
+}
+
+function createEtaMs(
+  processedCount: number,
+  totalCount: number,
+  startedAt: number,
+): number | null {
+  if (processedCount <= 0 || totalCount <= processedCount) {
+    return totalCount <= processedCount ? 0 : null;
+  }
+
+  const elapsedMs = Date.now() - startedAt;
+
+  if (elapsedMs <= 0) {
+    return null;
+  }
+
+  const remainingCount = totalCount - processedCount;
+  return Math.round((elapsedMs / processedCount) * remainingCount);
+}
+
 export async function scanDirectory(
   handle: FileSystemDirectoryHandle,
   directoryId: string,
+  onProgress?: (progress: ScanProgress) => void,
 ): Promise<SampleRecord[]> {
   const samples: SampleRecord[] = [];
+  const scanStartedAt = Date.now();
+  let lastProgressReportAt = 0;
+  let lastUiYieldAt = 0;
 
-  async function walk(
+  async function reportProgress(progress: ScanProgress, force = false): Promise<void> {
+    const now = Date.now();
+
+    if (!force && now - lastProgressReportAt < SCAN_PROGRESS_REPORT_INTERVAL_MS) {
+      if (now - lastUiYieldAt >= SCAN_PROGRESS_YIELD_INTERVAL_MS) {
+        lastUiYieldAt = now;
+        await yieldToUiThread();
+      }
+      return;
+    }
+
+    onProgress?.(progress);
+    lastProgressReportAt = now;
+
+    if (now - lastUiYieldAt >= SCAN_PROGRESS_YIELD_INTERVAL_MS) {
+      lastUiYieldAt = now;
+      await yieldToUiThread();
+    }
+  }
+
+  let countedSamples = 0;
+
+  async function countSupportedFiles(
     currentHandle: FileSystemDirectoryHandle,
     currentPath: string[],
   ): Promise<void> {
@@ -95,7 +148,46 @@ export async function scanDirectory(
       }
 
       if (entry.kind === "directory") {
-        await walk(entry, [...currentPath, entryName]);
+        await countSupportedFiles(entry, [...currentPath, entryName]);
+        continue;
+      }
+
+      const extension = getExtension(entryName);
+
+      if (!isSupportedSampleExtension(extension)) {
+        continue;
+      }
+
+      countedSamples += 1;
+      const relativePath = [...currentPath, entry.name].join("/");
+      await reportProgress(
+        {
+          phase: "counting",
+          discoveredSampleCount: countedSamples,
+          totalSampleCount: null,
+          scannedSampleCount: 0,
+          elapsedMs: Date.now() - scanStartedAt,
+          estimatedRemainingMs: null,
+          currentPath: relativePath,
+        },
+        countedSamples === 1,
+      );
+    }
+  }
+
+  async function walk(
+    currentHandle: FileSystemDirectoryHandle,
+    currentPath: string[],
+    totalSampleCount: number,
+    phaseStartedAt: number,
+  ): Promise<void> {
+    for await (const [entryName, entry] of currentHandle.entries()) {
+      if (shouldSkipEntry(entryName, entry.kind)) {
+        continue;
+      }
+
+      if (entry.kind === "directory") {
+        await walk(entry, [...currentPath, entryName], totalSampleCount, phaseStartedAt);
         continue;
       }
 
@@ -120,10 +212,56 @@ export async function scanDirectory(
         categoryGuess: guessCategory(relativePath),
         slotNumber: null,
       });
+
+      await reportProgress(
+        {
+          phase: "scanning",
+          discoveredSampleCount: totalSampleCount,
+          totalSampleCount,
+          scannedSampleCount: samples.length,
+          elapsedMs: Date.now() - scanStartedAt,
+          estimatedRemainingMs: createEtaMs(
+            samples.length,
+            totalSampleCount,
+            phaseStartedAt,
+          ),
+          currentPath: relativePath,
+        },
+        samples.length === 1 || samples.length === totalSampleCount,
+      );
     }
   }
 
-  await walk(handle, []);
+  await reportProgress(
+    {
+      phase: "counting",
+      discoveredSampleCount: 0,
+      totalSampleCount: null,
+      scannedSampleCount: 0,
+      elapsedMs: 0,
+      estimatedRemainingMs: null,
+      currentPath: null,
+    },
+    true,
+  );
+  await countSupportedFiles(handle, []);
+
+  const totalSampleCount = countedSamples;
+  const scanPhaseStartedAt = Date.now();
+
+  await reportProgress(
+    {
+      phase: "scanning",
+      discoveredSampleCount: totalSampleCount,
+      totalSampleCount,
+      scannedSampleCount: 0,
+      elapsedMs: Date.now() - scanStartedAt,
+      estimatedRemainingMs: totalSampleCount === 0 ? 0 : null,
+      currentPath: null,
+    },
+    true,
+  );
+  await walk(handle, [], totalSampleCount, scanPhaseStartedAt);
 
   return samples.sort((left, right) =>
     left.relativePath.localeCompare(right.relativePath, undefined, {

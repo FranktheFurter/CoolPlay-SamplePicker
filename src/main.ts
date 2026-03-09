@@ -145,18 +145,28 @@ function getNextSlotInRange(
 }
 
 function deriveState(nextState: AppState): AppState {
-  const filteredSamples = filterSamples(
-    nextState.samples,
-    nextState.query,
-    nextState.showAssignedOnly,
-  );
+  const previousState = store.getState();
+  const shouldRecomputeFilteredSamples =
+    nextState.samples !== previousState.samples ||
+    nextState.query !== previousState.query ||
+    nextState.showAssignedOnly !== previousState.showAssignedOnly;
+  const filteredSamples = shouldRecomputeFilteredSamples
+    ? filterSamples(
+        nextState.samples,
+        nextState.query,
+        nextState.showAssignedOnly,
+      )
+    : previousState.filteredSamples;
   let selectedSampleId = nextState.selectedSampleId;
 
   if (filteredSamples.length === 0) {
     selectedSampleId = null;
   } else if (!selectedSampleId) {
     selectedSampleId = filteredSamples[0].id;
-  } else if (!filteredSamples.some((sample) => sample.id === selectedSampleId)) {
+  } else if (
+    shouldRecomputeFilteredSamples &&
+    !filteredSamples.some((sample) => sample.id === selectedSampleId)
+  ) {
     selectedSampleId = filteredSamples[0].id;
   }
 
@@ -281,6 +291,15 @@ async function runScan(directory: PersistedDirectory): Promise<void> {
     currentDirectoryId: directory.id,
     currentDirectoryName: directory.name,
     isScanning: true,
+    scanProgress: {
+      phase: "counting",
+      discoveredSampleCount: 0,
+      totalSampleCount: null,
+      scannedSampleCount: 0,
+      elapsedMs: 0,
+      estimatedRemainingMs: null,
+      currentPath: null,
+    },
     samples: isDirectorySwitch ? [] : previousState.samples,
     error: null,
   });
@@ -296,7 +315,16 @@ async function runScan(directory: PersistedDirectory): Promise<void> {
       await getSamplesForDirectory(directory.id),
     );
     const slotMap = buildSlotMap(previousSamples);
-    const scannedSamples = await scanDirectory(directory.handle, directory.id);
+    const scannedSamples = await scanDirectory(
+      directory.handle,
+      directory.id,
+      (scanProgress) => {
+        commitState({
+          scanProgress,
+          error: null,
+        });
+      },
+    );
 
     const mergedSamples = scannedSamples.map((sample) => ({
       ...sample,
@@ -308,12 +336,14 @@ async function runScan(directory: PersistedDirectory): Promise<void> {
     commitState({
       samples: mergedSamples,
       isScanning: false,
+      scanProgress: null,
       lastScanAt: Date.now(),
       error: null,
     });
   } catch (error) {
     commitState({
       isScanning: false,
+      scanProgress: null,
       error:
         error instanceof Error
           ? error.message

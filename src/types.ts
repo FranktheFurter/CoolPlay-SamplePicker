@@ -36,6 +36,16 @@ export interface WaveformPreview {
   peaks: number[];
 }
 
+export interface ScanProgress {
+  phase: "counting" | "scanning";
+  discoveredSampleCount: number;
+  totalSampleCount: number | null;
+  scannedSampleCount: number;
+  elapsedMs: number;
+  estimatedRemainingMs: number | null;
+  currentPath: string | null;
+}
+
 export interface AppState {
   samples: SampleRecord[];
   filteredSamples: SampleRecord[];
@@ -49,6 +59,7 @@ export interface AppState {
   currentDirectoryId: string | null;
   currentDirectoryName: string | null;
   isScanning: boolean;
+  scanProgress: ScanProgress | null;
   currentAudioId: string | null;
   currentWaveform: WaveformPreview | null;
   lastScanAt: number | null;
