@@ -779,9 +779,9 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
                   type="button"
                   class="toolbar-main-button toolbar-key is-write-key is-write"
                   data-role="write-selected"
-                  title="Ausgewaehltes Sample auf den naechsten freien Slot im aktiven Segment schreiben (Pfeil rechts)"
+                  title="Ausgewaehltes Sample auf den naechsten freien Slot im aktiven Segment schreiben (Enter)"
                 >
-                  <span class="toolbar-key-arrow" aria-hidden="true">→</span>
+                  <span class="toolbar-key-arrow" aria-hidden="true">↵</span>
                   <span class="toolbar-key-label toolbar-main-button-label">Write</span>
                 </button>
               </div>
@@ -1873,7 +1873,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       handled = triggerToolbarButton(playSelectedButton);
     } else if (event.key === "ArrowDown") {
       handled = triggerToolbarButton(nextSelectedButton);
-    } else if (event.key === "ArrowRight") {
+    } else if (event.key === "Enter") {
       handled = triggerToolbarButton(writeSelectedButton);
     }
 
@@ -2005,8 +2005,8 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
         ? "Delete"
         : "Write";
       writeSelectedButton.title = removeSelectedAssignment
-        ? "Zuweisung des ausgewaehlten Samples entfernen und Segment lueckenlos nachruecken (Pfeil rechts)."
-        : "Ausgewaehltes Sample auf den naechsten freien Slot im aktiven Segment schreiben (Pfeil rechts).";
+        ? "Zuweisung des ausgewaehlten Samples entfernen und Segment lueckenlos nachruecken (Enter)."
+        : "Ausgewaehltes Sample auf den naechsten freien Slot im aktiven Segment schreiben (Enter).";
 
       const assignedOnlyModeActive = state.showAssignedOnly;
       const effectiveNormalizedQuery = assignedOnlyModeActive
