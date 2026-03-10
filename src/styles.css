@@ -505,6 +505,15 @@ input[type="search"] {
   color: var(--danger);
 }
 
+.success-box {
+  margin-bottom: 16px;
+  border: 1px solid rgba(120, 220, 232, 0.38);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(120, 220, 232, 0.12);
+  color: var(--accent-strong);
+}
+
 .waveform-panel {
   margin-bottom: 6px;
   border: 2px solid var(--border);
@@ -1105,10 +1114,6 @@ input[type="search"] {
 .slot-pixel.is-assigned {
   background: color-mix(in srgb, var(--accent) 88%, black 12%);
   box-shadow: none;
-}
-
-.slot-pixel.is-empty {
-  background: rgba(255, 255, 255, 0.06);
 }
 
 .empty-state {

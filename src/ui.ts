@@ -41,6 +41,7 @@ interface UIHandlers {
 
 interface UIController {
   render: (state: AppState) => void;
+  destroy: () => void;
 }
 
 interface SlotCategoryDefinition {
@@ -705,6 +706,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
         </section>
 
         <div class="error-box" data-role="error" hidden></div>
+        <div class="success-box" data-role="success" hidden></div>
 
         <section class="waveform-panel" data-role="waveform-panel">
           <div class="waveform-meta">
@@ -863,6 +865,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     '[data-role="scan-progress-path"]',
   );
   const errorElement = root.querySelector<HTMLDivElement>('[data-role="error"]');
+  const successElement = root.querySelector<HTMLDivElement>('[data-role="success"]');
   const waveformPanel = root.querySelector<HTMLElement>(
     '[data-role="waveform-panel"]',
   );
@@ -918,6 +921,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     !scanProgressDetailElement ||
     !scanProgressPathElement ||
     !errorElement ||
+    !successElement ||
     !waveformPanel ||
     !waveformTitle ||
     !waveformDuration ||
@@ -978,6 +982,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   let lastVirtualCurrentAudioId: string | null = null;
   let lastRenderedQuery = "";
   let lastRenderedAssignedOnly = false;
+  let resizeObserver: ResizeObserver | null = null;
   const pressAnimationByButton = new WeakMap<HTMLButtonElement, Animation>();
   const keyboardPressStateByButton = new WeakMap<
     HTMLButtonElement,
@@ -1546,8 +1551,6 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
 
         if (slotNumber <= definition.end) {
           pixelElement.dataset.slotNumber = String(slotNumber);
-        } else {
-          pixelElement.classList.add("is-empty");
         }
 
         cells.push(pixelElement);
@@ -1849,7 +1852,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     handlers.onLoopEnabledChange(target.checked);
   });
 
-  window.addEventListener("keydown", (event) => {
+  const handleWindowKeydown = (event: KeyboardEvent): void => {
     if (
       event.defaultPrevented ||
       event.ctrlKey ||
@@ -1877,7 +1880,9 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
     if (handled) {
       event.preventDefault();
     }
-  });
+  };
+
+  window.addEventListener("keydown", handleWindowKeydown);
 
   resultsBodyElement.addEventListener("scroll", () => {
     if (!virtualListMounted || virtualSamples.length === 0) {
@@ -1888,7 +1893,7 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
   });
 
   if (typeof ResizeObserver !== "undefined") {
-    const resizeObserver = new ResizeObserver(() => {
+    resizeObserver = new ResizeObserver(() => {
       if (!virtualListMounted || virtualSamples.length === 0) {
         return;
       }
@@ -1954,10 +1959,13 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
         state.isScanning ||
         state.currentDirectoryId === null ||
         !hasAssignments;
+      const randomCandidateCount = state.showAssignedOnly
+        ? state.filteredSamples.length
+        : state.filteredSamples.filter((sample) => sample.slotNumber === null).length;
       randomSampleButton.disabled =
         state.isScanning ||
         state.currentDirectoryId === null ||
-        state.filteredSamples.length === 0;
+        randomCandidateCount === 0;
       previousSelectedButton.disabled =
         state.isScanning ||
         state.currentDirectoryId === null ||
@@ -2097,6 +2105,14 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
         errorElement.textContent = "";
       }
 
+      if (!state.error && state.success) {
+        successElement.hidden = false;
+        successElement.textContent = state.success;
+      } else {
+        successElement.hidden = true;
+        successElement.textContent = "";
+      }
+
       const readyWaveform =
         state.currentWaveform && state.currentWaveform.peaks.length > 0
           ? state.currentWaveform
@@ -2168,6 +2184,14 @@ export function createUI(root: HTMLElement, handlers: UIHandlers): UIController 
       }
 
       scheduleVirtualRowsRender(true);
+    },
+    destroy() {
+      clearVirtualRenderFrame();
+      stopPlayheadAnimation();
+      stopWaveformSwapAnimation();
+      resizeObserver?.disconnect();
+      resizeObserver = null;
+      window.removeEventListener("keydown", handleWindowKeydown);
     },
   };
 }

@@ -51,6 +51,7 @@ export interface AppState {
   currentAudioId: string | null;
   currentWaveform: WaveformPreview | null;
   lastScanAt: number | null;
+  success: string | null;
   error: string | null;
 }
 

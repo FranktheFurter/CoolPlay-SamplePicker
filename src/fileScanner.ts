@@ -35,6 +35,13 @@ function getExtension(fileName: string): string {
   return segments.length > 1 ? segments.at(-1)!.toLowerCase() : "";
 }
 
+export function buildSampleRecordId(
+  directoryId: string,
+  relativePath: string,
+): string {
+  return `${directoryId}:${relativePath}`;
+}
+
 export function createPersistedDirectory(
   handle: FileSystemDirectoryHandle,
 ): {
@@ -175,7 +182,7 @@ export async function scanDirectory(
       const relativePath = [...currentPath, entry.name].join("/");
 
       samples.push({
-        id: `${directoryId}:${relativePath.toLowerCase()}`,
+        id: buildSampleRecordId(directoryId, relativePath),
         directoryId,
         name: entry.name,
         normalizedName: normalizeText(entry.name),

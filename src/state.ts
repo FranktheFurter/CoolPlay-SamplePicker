@@ -19,6 +19,7 @@ export const initialAppState: AppState = {
   currentAudioId: null,
   currentWaveform: null,
   lastScanAt: null,
+  success: null,
   error: null,
 };
 

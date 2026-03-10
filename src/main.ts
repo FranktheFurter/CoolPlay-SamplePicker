@@ -9,6 +9,7 @@ import {
   updateSampleSlotNumbers,
 } from "./db";
 import {
+  buildSampleRecordId,
   createPersistedDirectory,
   getFileFromRelativePath,
   isFileSystemAccessSupported,
@@ -35,6 +36,8 @@ const audioPreview = new AudioPreviewController((sampleId) => {
 let activeDirectory: PersistedDirectory | null = null;
 let waveformRequestToken = 0;
 let lastSelectedSampleId: string | null = null;
+let activeScanRunId = 0;
+let directoryContextVersion = 0;
 const MIN_SLOT_NUMBER = 1;
 const MAX_SLOT_NUMBER = 999;
 const EXPORT_FOLDER_PREFIX = "sample-picker-export";
@@ -58,6 +61,11 @@ function clampSlotCounter(slotNumber: number): number {
   }
 
   return Math.min(MAX_SLOT_NUMBER, Math.max(MIN_SLOT_NUMBER, Math.round(slotNumber)));
+}
+
+function createNextDirectoryContextVersion(): number {
+  directoryContextVersion += 1;
+  return directoryContextVersion;
 }
 
 function getAssignedSlotsInRange(
@@ -242,9 +250,11 @@ function deriveState(nextState: AppState): AppState {
 }
 
 function commitState(patch: Partial<AppState>): void {
+  const preserveSuccess = Object.prototype.hasOwnProperty.call(patch, "success");
+  const normalizedPatch = preserveSuccess ? patch : { ...patch, success: null };
   const nextState = deriveState({
     ...store.getState(),
-    ...patch,
+    ...normalizedPatch,
   });
 
   store.setState(nextState);
@@ -274,7 +284,7 @@ function buildSlotMap(samples: SampleRecord[]): Map<string, number> {
   return new Map(
     samples
       .filter((sample) => sample.slotNumber !== null)
-      .map((sample) => [sample.relativePath.toLowerCase(), sample.slotNumber!]),
+      .map((sample) => [sample.relativePath, sample.slotNumber!]),
   );
 }
 
@@ -355,6 +365,7 @@ async function loadWaveformForSelection(sampleId: string | null): Promise<void> 
 }
 
 async function runScan(directory: PersistedDirectory): Promise<void> {
+  const scanRunId = ++activeScanRunId;
   const previousState = store.getState();
   const isDirectorySwitch = previousState.currentDirectoryId !== directory.id;
 
@@ -390,6 +401,10 @@ async function runScan(directory: PersistedDirectory): Promise<void> {
       directory.handle,
       directory.id,
       (scanProgress) => {
+        if (scanRunId !== activeScanRunId) {
+          return;
+        }
+
         commitState({
           scanProgress,
           error: null,
@@ -397,12 +412,20 @@ async function runScan(directory: PersistedDirectory): Promise<void> {
       },
     );
 
+    if (scanRunId !== activeScanRunId) {
+      return;
+    }
+
     const mergedSamples = scannedSamples.map((sample) => ({
       ...sample,
-      slotNumber: slotMap.get(sample.relativePath.toLowerCase()) ?? null,
+      slotNumber: slotMap.get(sample.relativePath) ?? null,
     }));
 
     await replaceSamplesForDirectory(directory.id, mergedSamples);
+
+    if (scanRunId !== activeScanRunId) {
+      return;
+    }
 
     commitState({
       samples: mergedSamples,
@@ -412,6 +435,10 @@ async function runScan(directory: PersistedDirectory): Promise<void> {
       error: null,
     });
   } catch (error) {
+    if (scanRunId !== activeScanRunId) {
+      return;
+    }
+
     commitState({
       isScanning: false,
       scanProgress: null,
@@ -424,6 +451,8 @@ async function runScan(directory: PersistedDirectory): Promise<void> {
 }
 
 async function hydrateFromIndexedDb(): Promise<void> {
+  const hydrationDirectoryContextVersion = directoryContextVersion;
+
   try {
     const directory = await getCurrentDirectory();
 
@@ -431,14 +460,29 @@ async function hydrateFromIndexedDb(): Promise<void> {
       return;
     }
 
-    activeDirectory = directory;
+    if (hydrationDirectoryContextVersion !== directoryContextVersion) {
+      return;
+    }
 
     const persistedSamples = await getSamplesForDirectory(directory.id);
-    const samples = filterSupportedSamples(persistedSamples);
+    const samples = filterSupportedSamples(persistedSamples).map((sample) => ({
+      ...sample,
+      id: buildSampleRecordId(sample.directoryId, sample.relativePath),
+    }));
 
-    if (samples.length !== persistedSamples.length) {
+    const shouldRewriteSamples =
+      samples.length !== persistedSamples.length ||
+      samples.some((sample, index) => sample.id !== persistedSamples[index]?.id);
+
+    if (shouldRewriteSamples) {
       await replaceSamplesForDirectory(directory.id, samples);
     }
+
+    if (hydrationDirectoryContextVersion !== directoryContextVersion) {
+      return;
+    }
+
+    activeDirectory = directory;
 
     commitState({
       currentDirectoryId: directory.id,
@@ -468,6 +512,7 @@ async function handlePickDirectory(): Promise<void> {
   try {
     const handle = await window.showDirectoryPicker();
     const directory = createPersistedDirectory(handle);
+    createNextDirectoryContextVersion();
 
     audioPreview.stop();
     activeDirectory = directory;
@@ -648,7 +693,8 @@ async function handleExportAssignments(
     }
 
     commitState({
-      error: `Export abgeschlossen: ${assignedSamples.length} Samples wurden als WAV in den Zielordner geschrieben.`,
+      success: `Export abgeschlossen: ${assignedSamples.length} Samples wurden als WAV in den Zielordner geschrieben.`,
+      error: null,
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
@@ -737,14 +783,11 @@ function handleSelectSample(sampleId: string): void {
 
 function handleSelectRandomSample(): string | null {
   const state = store.getState();
-  const candidates = state.filteredSamples.filter(
-    (sample) => sample.slotNumber === null,
-  );
+  const candidates = state.showAssignedOnly
+    ? state.filteredSamples
+    : state.filteredSamples.filter((sample) => sample.slotNumber === null);
 
   if (candidates.length === 0) {
-    commitState({
-      error: "Keine unzugewiesenen Samples in der aktuellen Trefferliste.",
-    });
     return null;
   }
 
@@ -1039,7 +1082,7 @@ const ui = createUI(appRoot, {
   onTogglePlay: handleTogglePlay,
 });
 
-store.subscribe((state) => {
+const unsubscribeStore = store.subscribe((state) => {
   ui.render(state);
 
   if (state.selectedSampleId !== lastSelectedSampleId) {
@@ -1051,6 +1094,24 @@ store.subscribe((state) => {
     }
   }
 });
+
+let appDestroyed = false;
+const destroyApp = (): void => {
+  if (appDestroyed) {
+    return;
+  }
+
+  appDestroyed = true;
+  unsubscribeStore();
+  ui.destroy();
+  audioPreview.stop();
+};
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    destroyApp();
+  });
+}
 
 commitState({
   error: isFileSystemAccessSupported()
