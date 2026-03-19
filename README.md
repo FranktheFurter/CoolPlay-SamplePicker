@@ -2,7 +2,11 @@
 
 ![App screenshot](output/chrome-mcp/readme-app-preview.png)
 
-Small local prototype for a browser-based sample browsing app.
+I built this tool because picking samples for the Teenage Engineering KO II was more tedious than it should be. Doing that work inside a DAW like Ableton is possible, but it never felt fast or satisfying enough for the kind of high-volume sample sorting I wanted to do.
+
+The goal of this prototype is to make the process feel quick, tactile, and keyboard-first. I genuinely enjoy scrolling through samples, so I wanted a workflow that makes that part as smooth and satisfying as possible while still being practical when sorting hundreds of sounds into the right KO II categories.
+
+This app is designed to speed up that exact job: browse a large local sample library, assign sounds quickly with keyboard shortcuts, and export the final selection in a format that is convenient for the KO II workflow. Right now, it is a first prototype focused on speed, feel, and utility.
 
 ## Setup
 
