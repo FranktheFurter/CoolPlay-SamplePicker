@@ -1,4 +1,4 @@
-# Sample Picker MVP
+# CoolPlay Sample Picker MVP
 
 ![App screenshot](output/chrome-mcp/readme-app-preview.png)
 
