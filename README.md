@@ -27,4 +27,4 @@ This app is designed to speed up that exact job: browse a large local sample lib
 - The repository is prepared for GitHub Pages deployment via GitHub Actions.
 - In GitHub, go to `Settings -> Pages` and choose `GitHub Actions` as the source.
 - After that, every push to `main` will automatically deploy the static site.
-- For this repository, the app is expected at `https://frankthefurter.github.io/CoolPlay-SamplePicker/` as long as the repository name stays the same.
+- For this repository, the app is expected at `https://frankthefurter.github.io/DJ-Coolplay-Samplepicker/` as long as the repository name stays the same.
