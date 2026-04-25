@@ -1184,7 +1184,7 @@ async function playSample(
       currentAudioId: null,
       error:
         isUnsupportedMediaError
-          ? `Audio preview for "${sample.name}" could not be played. The file format or codec is not supported by this browser.`
+          ? `Audio preview for "${sample.name}" could not be played. This WAV may use an unsupported encoding. Try converting it to 16-bit PCM WAV before using it with the KO II.`
           : error instanceof Error
             ? error.message
             : "Audio preview could not be started.",
