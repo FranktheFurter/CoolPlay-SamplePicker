@@ -1,3 +1,10 @@
 node_modules
 dist
 
+# Local tooling and generated debug artifacts
+.codex-artifacts/
+.playwright-cli/
+output/
+
+# macOS metadata
+.DS_Store

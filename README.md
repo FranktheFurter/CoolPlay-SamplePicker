@@ -1,6 +1,16 @@
 # CoolPlay Sample Picker MVP
 
-![App screenshot](output/chrome-mcp/readme-app-preview.png)
+![App screenshot](docs/readme-app-preview.png)
+
+## How to use
+
+1. Open the app in a current desktop version of Chrome or Edge.
+2. Click `Choose folder` and select a folder that contains your `.wav` samples.
+3. Browse samples with the keyboard, play them back, and assign the ones you like to slots.
+4. Use `Assigned only` to review your picks.
+5. Click `Export` to download the selected samples as a ZIP file.
+
+Everything runs locally in your browser. Your sample files are not uploaded anywhere.
 
 I built this tool because picking samples for the Teenage Engineering KO II was more tedious than it should be. Doing that work inside a DAW like Ableton is possible, but it never felt fast or satisfying enough for the kind of high-volume sample sorting I wanted to do.
 
