@@ -1,4 +1,4 @@
-# CoolPlay Sample Picker MVP
+# DJ Coolplay Samplepicker
 
 ![App screenshot](docs/readme-app-preview.png)
 
